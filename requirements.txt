@@ -1,0 +1,38 @@
+# BarkEm - Dependencies
+# Install: pip install -r requirements.txt
+
+# Computer Vision
+dxcam>=0.3.0
+opencv-python>=4.10.0
+pytesseract>=0.3.10
+numpy>=1.24.0
+
+# Input Simulation
+pydirectinput-rgx>=1.0.0
+pywin32>=306
+
+# State Machine
+python-statemachine>=2.3.0
+
+# API
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+pydantic>=2.6.0
+pydantic-settings>=2.2.0
+httpx>=0.27.0
+
+# Inter-bot Communication
+redis>=5.0.0
+
+# Utilities
+tenacity>=8.2.0
+loguru>=0.7.2
+pyyaml>=6.0.1
+rapidfuzz>=3.6.0
+
+# Development
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+black>=24.0.0
+ruff>=0.3.0
+mypy>=1.8.0
