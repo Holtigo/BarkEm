@@ -17,6 +17,7 @@ class GameSettings(BaseModel):
     resolution: str = "1920x1080"
     display_mode: Literal["borderless", "windowed", "fullscreen"] = "borderless"
     window_title: str = "THE FINALS"
+    bot_embark_id: str = "BarkEmBot#0746"
 
 
 class VisionSettings(BaseModel):
@@ -43,10 +44,11 @@ class InputSettings(BaseModel):
 class TimingSettings(BaseModel):
     """Timing and timeout settings."""
 
-    party_invite_timeout: int = 30
-    player_join_timeout: int = 120
+    default_cancel_timeout: int = 300
     match_max_duration: int = 1200
     state_transition_timeout: int = 10
+    countdown_seconds: int = 3
+    pause_cooldown: float = 30.0
 
 
 class MonitoringSettings(BaseModel):
@@ -56,6 +58,7 @@ class MonitoringSettings(BaseModel):
     mid_poll_interval: int = 30
     late_poll_interval: int = 10
     late_threshold_seconds: int = 600
+    chat_poll_interval: float = 1.0  # How often to check chat for commands
 
 
 class APISettings(BaseModel):
@@ -65,18 +68,6 @@ class APISettings(BaseModel):
     port: int = 8080
     webhook_timeout: int = 30
     webhook_retries: int = 3
-
-
-class RedisSettings(BaseModel):
-    """Redis connection settings."""
-
-    host: str = "localhost"
-    port: int = 6379
-    channel_prefix: str = "barkem"
-
-    @property
-    def url(self) -> str:
-        return f"redis://{self.host}:{self.port}"
 
 
 class LoggingSettings(BaseModel):
@@ -102,7 +93,6 @@ class Settings(BaseSettings):
     timing: TimingSettings = Field(default_factory=TimingSettings)
     monitoring: MonitoringSettings = Field(default_factory=MonitoringSettings)
     api: APISettings = Field(default_factory=APISettings)
-    redis: RedisSettings = Field(default_factory=RedisSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
 
     @classmethod

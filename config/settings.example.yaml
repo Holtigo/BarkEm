@@ -5,6 +5,7 @@ game:
   resolution: "1920x1080"
   display_mode: "borderless"  # Required for capture
   window_title: "THE FINALS"
+  bot_embark_id: "BarkEmBot#0746"
 
 vision:
   capture_fps: 10
@@ -22,27 +23,24 @@ input:
   humanize_movement: true
 
 timing:
-  party_invite_timeout: 30
-  player_join_timeout: 120
+  default_cancel_timeout: 300
   match_max_duration: 1200
   state_transition_timeout: 10
+  countdown_seconds: 3
+  pause_cooldown: 30.0
 
 monitoring:
   initial_poll_interval: 60
   mid_poll_interval: 30
   late_poll_interval: 10
   late_threshold_seconds: 600
+  chat_poll_interval: 1.0
 
 api:
   host: "0.0.0.0"
   port: 8080
   webhook_timeout: 30
   webhook_retries: 3
-
-redis:
-  host: "localhost"
-  port: 6379
-  channel_prefix: "barkem"
 
 logging:
   level: "INFO"

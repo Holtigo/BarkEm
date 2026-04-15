@@ -1,8 +1,7 @@
 """
-Bot module - State machines for orchestrator and child bots.
+Bot module - State machine for BarkEm.
 """
 
-from barkem.bot.orchestrator import OrchestratorBot
-from barkem.bot.child import ChildBot
+from barkem.bot.barkem import BarkEmBot, BarkEmStateMachine, MatchConfig, TeamInfo
 
-__all__ = ["OrchestratorBot", "ChildBot"]
+__all__ = ["BarkEmBot", "BarkEmStateMachine", "MatchConfig", "TeamInfo"]
