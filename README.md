@@ -2,8 +2,6 @@
 
 **Private match automation for The Finals**
 
-> Bark 'em into the lobby.
-
 Stop manually creating lobbies. BarkEm handles lobby creation, team placement, match monitoring, and result capture so you can focus on running tournaments, not clicking menus.
 
 ## Features
