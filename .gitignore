@@ -70,3 +70,4 @@ templates/*.jpg
 
 # Redis dump
 dump.rdb
+/config/settings.yaml

@@ -5,7 +5,7 @@ game:
   resolution: "1920x1080"
   display_mode: "borderless"  # Required for capture
   window_title: "THE FINALS"
-  bot_embark_id: "BarkEmBot#0746"
+  bot_embark_id: "BarkEmBot#0000"
 
 vision:
   capture_fps: 10
