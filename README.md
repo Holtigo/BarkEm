@@ -1,28 +1,35 @@
-# 🐕 BarkEm
+# BarkEm
 
 **Private match automation for The Finals**
 
 > Bark 'em into the lobby.
 
-Stop manually creating lobbies. BarkEm handles party invites, lobby creation, team placement, match monitoring, and result capture so you can focus on running tournaments, not clicking menus.
+Stop manually creating lobbies. BarkEm handles lobby creation, team placement, match monitoring, and result capture so you can focus on running tournaments, not clicking menus.
 
 ## Features
 
 - **Automated lobby creation** — Creates private matches with configured mode, map, and variant
-- **Party-based team population** — Invites players via party system, auto-joins entire teams
+- **Manual player join** — Returns lobby code via API, players join themselves
 - **Team placement** — Uses OCR to identify players and drag them to correct teams
+- **Captain ready system** — Match starts when both team captains type `-em ready` in game chat
+- **Pause/unpause support** — Captains can type `-em pause` and `-em unpause` during matches
 - **Match monitoring** — Sparse polling to detect match completion without resource waste
 - **Result capture** — Screenshots scoreboard, extracts scores via OCR
 - **Platform-agnostic API** — RESTful endpoints + webhooks for integration with any tournament system
 
 ## Architecture
 
-BarkEm uses a **parent/child bot model**:
+BarkEm uses a **single bot model**:
 
-- **Orchestrator (Parent)** — Handles Team 1 party, creates lobby, manages teams, captures results
-- **Child Bot** — Handles Team 2 party, joins via code, leaves after placement (reusable)
+1. Bot creates private match lobby
+2. Returns lobby code via API → players join manually
+3. Bot moves itself to spectator, then places players on correct teams
+4. Monitors chat for captain `-em ready` commands
+5. Both captains ready → countdown → match starts
+6. During match: monitors for `-em pause` / `-em unpause`
+7. Match ends → captures scoreboard → returns results via webhook
 
-Both bots use computer vision (screen capture + template matching) and standard Windows input APIs, ensuring compatibility with Easy Anti-Cheat.
+The bot uses computer vision (screen capture + template matching + OCR) and standard Windows input APIs, ensuring compatibility with Easy Anti-Cheat.
 
 ## Requirements
 
@@ -30,8 +37,7 @@ Both bots use computer vision (screen capture + template matching) and standard 
 - Python 3.11+
 - [Tesseract OCR](https://github.com/UB-Mannheim/tesseract/wiki) (add to PATH)
 - The Finals running in **Borderless Windowed** mode
-- Two game accounts (for orchestrator + child bot)
-- Redis (for inter-bot communication)
+- One game account for the bot
 
 ## Installation
 
@@ -62,6 +68,7 @@ Edit `config/settings.yaml`:
 game:
   resolution: "1920x1080"
   window_title: "THE FINALS"
+  bot_embark_id: "YourBotAccount#1234"
 
 api:
   host: "0.0.0.0"
@@ -90,6 +97,7 @@ curl -X POST http://localhost:8080/api/v1/match/start \
       "map": "monaco",
       "variant": "default"
     },
+    "cancel_timeout_seconds": 300,
     "teams": [
       {
         "team_id": 1,
@@ -112,16 +120,33 @@ curl -X POST http://localhost:8080/api/v1/match/start \
   }'
 ```
 
+**Note:** The first player in each team is the **captain**. Only captains can trigger `-em ready`, `-em pause`, and `-em unpause` commands.
+
+### Response
+
+```json
+{
+  "status": "accepted",
+  "match_id": "test-001",
+  "lobby_code": "AB12",
+  "captains": {
+    "team1": "Player1#1234",
+    "team2": "Player4#3456"
+  }
+}
+```
+
+Distribute the `lobby_code` to players so they can join the match.
+
 ## Project Structure
 
 ```
 barkem/
-├── src/
-│   ├── vision/        # Screen capture, template matching, OCR
+├── src/barkem/
+│   ├── vision/        # Screen capture, template matching, OCR, chat reading
 │   ├── input/         # Mouse/keyboard simulation
-│   ├── bot/           # State machines (orchestrator, child)
+│   ├── bot/           # Main bot state machine
 │   ├── api/           # FastAPI endpoints
-│   ├── comms/         # Inter-bot Redis messaging
 │   └── config/        # Settings management
 ├── templates/         # UI element images (user-captured)
 ├── config/            # Runtime configuration
@@ -131,7 +156,7 @@ barkem/
 
 ## Development Status
 
-🚧 **Proof of Concept** — Not yet production-ready.
+**Proof of Concept** — Not yet production-ready.
 
 See [docs/roadmap.md](docs/roadmap.md) for implementation phases.
 
@@ -159,4 +184,4 @@ This work is licensed under a
 
 ---
 
-*Made for the competitive Finals community* 🎮
+*Made for the competitive Finals community*
