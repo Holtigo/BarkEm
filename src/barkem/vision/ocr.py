@@ -1,5 +1,8 @@
 """
-OCR for reading player names and scores.
+OCR for reading player names, lobby codes, and scores.
+
+Tesseract path is set explicitly to avoid PATH issues.
+Configure via settings.yaml: vision.tesseract_cmd
 """
 
 from dataclasses import dataclass
@@ -7,9 +10,7 @@ from typing import Optional
 
 import cv2
 import numpy as np
-
-# TODO: Import when implementing
-# import pytesseract
+import pytesseract
 
 
 @dataclass
@@ -24,8 +25,29 @@ class OCRResult:
 class TextReader:
     """Handles OCR for extracting text from game UI."""
 
-    def __init__(self, upscale_factor: int = 3):
+    def __init__(
+            self,
+            upscale_factor: int = 3,
+            tesseract_cmd: Optional[str] = None,
+    ):
+        """
+        Initialize the text reader.
+
+        Args:
+            upscale_factor: How much to upscale images before OCR.
+            tesseract_cmd: Explicit path to tesseract.exe.
+                           Defaults to standard Windows install location.
+        """
         self.upscale_factor = upscale_factor
+
+        # Set Tesseract path explicitly — no PATH required
+        if tesseract_cmd:
+            pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
+        else:
+            # Default Windows install location
+            pytesseract.pytesseract.tesseract_cmd = (
+                r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+            )
 
     def preprocess(self, image: np.ndarray) -> np.ndarray:
         """
@@ -68,10 +90,10 @@ class TextReader:
         return binary
 
     def read_text(
-        self,
-        image: np.ndarray,
-        whitelist: Optional[str] = None,
-        psm: int = 7,
+            self,
+            image: np.ndarray,
+            whitelist: Optional[str] = None,
+            psm: int = 7,
     ) -> str:
         """
         Extract text from image.
@@ -79,7 +101,9 @@ class TextReader:
         Args:
             image: BGR or grayscale image.
             whitelist: Optional character whitelist.
-            psm: Page segmentation mode (default: 7 = single line).
+            psm: Page segmentation mode.
+                 7 = single line (for names, codes).
+                 6 = block of text (for chat).
 
         Returns:
             Extracted text string.
@@ -90,15 +114,69 @@ class TextReader:
         if whitelist:
             config += f" -c tessedit_char_whitelist={whitelist}"
 
-        # TODO: Implement
-        # text = pytesseract.image_to_string(processed, config=config)
-        # return text.strip()
-        return ""
+        text = pytesseract.image_to_string(processed, config=config)
+        return text.strip()
+
+    def read_text_with_confidence(
+            self,
+            image: np.ndarray,
+            whitelist: Optional[str] = None,
+            psm: int = 7,
+    ) -> OCRResult:
+        """
+        Extract text with confidence score.
+
+        Args:
+            image: BGR or grayscale image.
+            whitelist: Optional character whitelist.
+            psm: Page segmentation mode.
+
+        Returns:
+            OCRResult with text and confidence.
+        """
+        processed = self.preprocess(image)
+
+        config = f"--oem 3 --psm {psm}"
+        if whitelist:
+            config += f" -c tessedit_char_whitelist={whitelist}"
+
+        # Get detailed data
+        data = pytesseract.image_to_data(
+            processed, config=config, output_type=pytesseract.Output.DICT
+        )
+
+        # Combine text and calculate average confidence
+        words = []
+        confidences = []
+        for i, text in enumerate(data["text"]):
+            text = text.strip()
+            if text:
+                words.append(text)
+                conf = int(data["conf"][i])
+                if conf > 0:
+                    confidences.append(conf)
+
+        combined_text = " ".join(words)
+        avg_confidence = sum(confidences) / len(confidences) if confidences else 0.0
+
+        return OCRResult(
+            text=combined_text,
+            confidence=avg_confidence,
+            region=(0, 0, image.shape[1], image.shape[0]),
+        )
 
     def read_player_name(self, image: np.ndarray) -> str:
-        """Read a player name (Embark ID format)."""
+        """Read a player name (Embark ID format: PlayerName#1234)."""
         whitelist = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789#_-"
         return self.read_text(image, whitelist=whitelist)
+
+    def read_lobby_code(self, image: np.ndarray) -> str:
+        """Read the 4-character alphanumeric lobby code."""
+        whitelist = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+        text = self.read_text(image, whitelist=whitelist)
+        # Remove any spaces/noise and take first 4 chars
+        text = text.replace(" ", "").strip()
+        return text[:4] if len(text) >= 4 else text
 
     def read_score(self, image: np.ndarray) -> Optional[int]:
         """Read a numeric score."""
@@ -110,12 +188,26 @@ class TextReader:
             return None
 
     def read_region(
-        self,
-        frame: np.ndarray,
-        region: tuple[int, int, int, int],
-        **kwargs,
+            self,
+            frame: np.ndarray,
+            region: tuple[int, int, int, int],
+            **kwargs,
     ) -> str:
         """Read text from a specific region of the frame."""
         x1, y1, x2, y2 = region
         roi = frame[y1:y2, x1:x2]
         return self.read_text(roi, **kwargs)
+
+    def read_region_with_confidence(
+            self,
+            frame: np.ndarray,
+            region: tuple[int, int, int, int],
+            **kwargs,
+    ) -> OCRResult:
+        """Read text with confidence from a specific region of the frame."""
+        x1, y1, x2, y2 = region
+        roi = frame[y1:y2, x1:x2]
+        result = self.read_text_with_confidence(roi, **kwargs)
+        # Update region to match the frame coordinates
+        result.region = (x1, y1, x2, y2)
+        return result

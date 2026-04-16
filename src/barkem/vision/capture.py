@@ -5,9 +5,7 @@ Screen capture using DXcam.
 from typing import Optional
 
 import numpy as np
-
-# TODO: Import when implementing
-# import dxcam
+import dxcam
 
 
 class ScreenCapture:
@@ -19,14 +17,13 @@ class ScreenCapture:
 
     def start(self) -> None:
         """Initialize the capture device."""
-        # TODO: Implement
-        # self._camera = dxcam.create(output_color="BGR")
-        pass
+        self._camera = dxcam.create(output_color="BGR")
 
     def stop(self) -> None:
         """Release the capture device."""
-        # TODO: Implement
-        pass
+        if self._camera is not None:
+            self._camera.release()
+            self._camera = None
 
     def grab(self, region: Optional[tuple[int, int, int, int]] = None) -> Optional[np.ndarray]:
         """
@@ -38,9 +35,10 @@ class ScreenCapture:
         Returns:
             BGR numpy array of the captured frame, or None if capture failed.
         """
-        # TODO: Implement
-        # return self._camera.grab(region=region)
-        pass
+        if self._camera is None:
+            self.start()
+
+        return self._camera.grab(region=region)
 
     def __enter__(self) -> "ScreenCapture":
         self.start()
