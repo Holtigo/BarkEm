@@ -1,270 +1,248 @@
 """
-Input simulation using pydirectinput.
+XInput controller emulation — cross-platform.
 
-Uses click-based "Move in Lobby" workflow instead of drag-and-drop:
-  1. Click player in unassigned list → context menu opens
-  2. Click "Move in Lobby" in context menu
-  3. Click destination slot (team or spectator)
+Windows: vgamepad + ViGEmBus (virtual Xbox 360 controller)
+Linux:   evdev + uinput (kernel-native virtual gamepad)
 
-Uses SendInput() with DirectInput scan codes — same input path as physical
-hardware. No known EAC detection signatures.
+The backend is selected automatically based on the OS.
+All downstream code uses GamepadController without caring which.
 """
 
-import random
+import sys
 import time
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Optional
 
-import pydirectinput
 
-from barkem.vision.regions import ClickTarget
-
+# ── Config ────────────────────────────────────────────────────────────────
 
 @dataclass
-class InputConfig:
-    """Configuration for input simulation."""
+class GamepadConfig:
+    """Timing config for gamepad input."""
 
-    click_delay_min: float = 0.1
-    click_delay_max: float = 0.3
-    typing_interval: float = 0.1
-    humanize_movement: bool = True
-    # Pause between steps in multi-click workflows (context menu, placement)
-    workflow_step_delay_min: float = 0.3
-    workflow_step_delay_max: float = 0.6
+    button_delay: float = 0.15
+    hold_duration: float = 0.05
+    anchor_presses: int = 5
+    anchor_settle: float = 0.3
 
 
-class InputController:
+# ── Abstract backend ──────────────────────────────────────────────────────
+
+class _GamepadBackend(ABC):
+    """Minimal interface each OS backend must implement."""
+
+    @abstractmethod
+    def connect(self) -> None: ...
+
+    @abstractmethod
+    def disconnect(self) -> None: ...
+
+    @abstractmethod
+    def press_button(self, button: str) -> None: ...
+
+    @abstractmethod
+    def release_button(self, button: str) -> None: ...
+
+
+# ── Windows backend (vgamepad) ────────────────────────────────────────────
+
+class _WindowsBackend(_GamepadBackend):
+
+    def __init__(self):
+        self._pad = None
+        self._button_map = None
+
+    def connect(self) -> None:
+        import vgamepad as vg
+
+        self._button_map = {
+            "a": vg.XUSB_BUTTON.XUSB_GAMEPAD_A,
+            "b": vg.XUSB_BUTTON.XUSB_GAMEPAD_B,
+            "x": vg.XUSB_BUTTON.XUSB_GAMEPAD_X,
+            "y": vg.XUSB_BUTTON.XUSB_GAMEPAD_Y,
+            "start": vg.XUSB_BUTTON.XUSB_GAMEPAD_START,
+            "back": vg.XUSB_BUTTON.XUSB_GAMEPAD_BACK,
+            "up": vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_UP,
+            "down": vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_DOWN,
+            "left": vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_LEFT,
+            "right": vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_RIGHT,
+            "lb": vg.XUSB_BUTTON.XUSB_GAMEPAD_LEFT_SHOULDER,
+            "rb": vg.XUSB_BUTTON.XUSB_GAMEPAD_RIGHT_SHOULDER,
+        }
+        self._pad = vg.VX360Gamepad()
+        self._pad.reset()
+        self._pad.update()
+
+    def disconnect(self) -> None:
+        if self._pad:
+            self._pad.reset()
+            self._pad.update()
+            self._pad = None
+
+    def press_button(self, button: str) -> None:
+        self._pad.press_button(self._button_map[button])
+        self._pad.update()
+
+    def release_button(self, button: str) -> None:
+        self._pad.release_button(self._button_map[button])
+        self._pad.update()
+
+
+# ── Linux backend (evdev / uinput) ────────────────────────────────────────
+
+class _LinuxBackend(_GamepadBackend):
+
+    def __init__(self):
+        self._device = None
+        self._button_map = None
+
+    def connect(self) -> None:
+        import evdev
+        from evdev import UInput, ecodes, AbsInfo
+
+        self._button_map = {
+            "a": ecodes.BTN_SOUTH,
+            "b": ecodes.BTN_EAST,
+            "x": ecodes.BTN_WEST,
+            "y": ecodes.BTN_NORTH,
+            "start": ecodes.BTN_START,
+            "back": ecodes.BTN_SELECT,
+            "lb": ecodes.BTN_TL,
+            "rb": ecodes.BTN_TR,
+            # D-pad uses ABS hat axes, handled specially
+            "up": "hat_up",
+            "down": "hat_down",
+            "left": "hat_left",
+            "right": "hat_right",
+        }
+
+        capabilities = {
+            ecodes.EV_KEY: [
+                ecodes.BTN_SOUTH, ecodes.BTN_EAST,
+                ecodes.BTN_WEST, ecodes.BTN_NORTH,
+                ecodes.BTN_START, ecodes.BTN_SELECT,
+                ecodes.BTN_TL, ecodes.BTN_TR,
+            ],
+            ecodes.EV_ABS: [
+                (ecodes.ABS_HAT0X, AbsInfo(0, -1, 1, 0, 0, 0)),
+                (ecodes.ABS_HAT0Y, AbsInfo(0, -1, 1, 0, 0, 0)),
+            ],
+        }
+
+        self._device = UInput(
+            events=capabilities,
+            name="BarkEm Virtual Gamepad",
+            vendor=0x045E,   # Microsoft
+            product=0x028E,  # Xbox 360 Controller
+        )
+
+    def disconnect(self) -> None:
+        if self._device:
+            self._device.close()
+            self._device = None
+
+    def press_button(self, button: str) -> None:
+        from evdev import ecodes
+
+        mapped = self._button_map[button]
+        if mapped == "hat_up":
+            self._device.write(ecodes.EV_ABS, ecodes.ABS_HAT0Y, -1)
+        elif mapped == "hat_down":
+            self._device.write(ecodes.EV_ABS, ecodes.ABS_HAT0Y, 1)
+        elif mapped == "hat_left":
+            self._device.write(ecodes.EV_ABS, ecodes.ABS_HAT0X, -1)
+        elif mapped == "hat_right":
+            self._device.write(ecodes.EV_ABS, ecodes.ABS_HAT0X, 1)
+        else:
+            self._device.write(ecodes.EV_KEY, mapped, 1)
+        self._device.syn()
+
+    def release_button(self, button: str) -> None:
+        from evdev import ecodes
+
+        mapped = self._button_map[button]
+        if mapped in ("hat_up", "hat_down"):
+            self._device.write(ecodes.EV_ABS, ecodes.ABS_HAT0Y, 0)
+        elif mapped in ("hat_left", "hat_right"):
+            self._device.write(ecodes.EV_ABS, ecodes.ABS_HAT0X, 0)
+        else:
+            self._device.write(ecodes.EV_KEY, mapped, 0)
+        self._device.syn()
+
+
+# ── Public controller (backend-agnostic) ──────────────────────────────────
+
+VALID_BUTTONS = {"a", "b", "x", "y", "start", "back", "up", "down", "left", "right", "lb", "rb"}
+
+
+def _create_backend() -> _GamepadBackend:
+    if sys.platform == "win32":
+        return _WindowsBackend()
+    elif sys.platform.startswith("linux"):
+        return _LinuxBackend()
+    else:
+        raise RuntimeError(f"Unsupported platform: {sys.platform}")
+
+
+class GamepadController:
     """
-    Handles mouse and keyboard input simulation.
+    Virtual gamepad for UI navigation.
 
-    All player movement uses the click-based "Move in Lobby" approach:
-    no dragging needed.
+    Identical API on Windows and Linux — backend is selected automatically.
     """
 
-    def __init__(self, config: Optional[InputConfig] = None):
-        self.config = config or InputConfig()
+    def __init__(self, config: Optional[GamepadConfig] = None):
+        self.config = config or GamepadConfig()
+        self._backend: Optional[_GamepadBackend] = None
 
-    # ── Low-Level Input ────────────────────────────────────────────────────
+    # ── Lifecycle ──────────────────────────────────────────────────────
 
-    def _random_delay(self, min_val: float, max_val: float) -> None:
-        """Sleep for a random duration within range."""
-        time.sleep(random.uniform(min_val, max_val))
+    def connect(self) -> None:
+        if self._backend is None:
+            self._backend = _create_backend()
+        self._backend.connect()
 
-    def _workflow_pause(self) -> None:
-        """Pause between steps in a multi-click workflow."""
-        self._random_delay(
-            self.config.workflow_step_delay_min,
-            self.config.workflow_step_delay_max,
-        )
+    def disconnect(self) -> None:
+        if self._backend:
+            self._backend.disconnect()
+            self._backend = None
 
-    def move_to(self, x: int, y: int, duration: Optional[float] = None) -> None:
-        """
-        Move mouse to coordinates.
+    @property
+    def backend(self) -> _GamepadBackend:
+        if self._backend is None:
+            self.connect()
+        return self._backend
 
-        Args:
-            x: Target X coordinate.
-            y: Target Y coordinate.
-            duration: Optional movement duration in seconds.
-        """
-        if duration is None:
-            duration = random.uniform(0.1, 0.3)
+    # ── Low-level ──────────────────────────────────────────────────────
 
-        pydirectinput.moveTo(x, y, duration=duration)
+    def press(self, button: str, count: int = 1) -> None:
+        button = button.lower()
+        for _ in range(count):
+            self.backend.press_button(button)
+            time.sleep(self.config.hold_duration)
+            self.backend.release_button(button)
+            time.sleep(self.config.button_delay)
 
-    def click(self, x: Optional[int] = None, y: Optional[int] = None) -> None:
-        """
-        Click at coordinates (or current position if not specified).
+    # ── Mid-level ─────────────────────────────────────────────────────
 
-        Args:
-            x: Optional X coordinate.
-            y: Optional Y coordinate.
-        """
-        if x is not None and y is not None:
-            self.move_to(x, y)
-            self._random_delay(0.05, 0.15)  # Settle time
+    def anchor(self, presses: Optional[int] = None) -> None:
+        self.press("b", presses or self.config.anchor_presses)
+        time.sleep(self.config.anchor_settle)
 
-        pydirectinput.click()
-        self._random_delay(self.config.click_delay_min, self.config.click_delay_max)
+    def navigate(self, sequence: list[str]) -> None:
+        for action in sequence:
+            self.press(action)
 
-    def click_target(self, target: ClickTarget) -> None:
-        """Click a ClickTarget from the regions config."""
-        self.click(target.x, target.y)
+    def navigate_relative(self, direction: str, count: int) -> None:
+        if count > 0:
+            self.press(direction, count)
 
-    def double_click(self, x: Optional[int] = None, y: Optional[int] = None) -> None:
-        """Double-click at coordinates."""
-        if x is not None and y is not None:
-            self.move_to(x, y)
-            self._random_delay(0.05, 0.15)
+    def confirm(self) -> None:
+        self.press("a")
 
-        pydirectinput.doubleClick()
-        self._random_delay(self.config.click_delay_min, self.config.click_delay_max)
+    def cancel(self) -> None:
+        self.press("b")
 
-    def type_text(self, text: str) -> None:
-        """
-        Type text with human-like intervals.
-
-        Args:
-            text: Text to type.
-        """
-        for char in text:
-            pydirectinput.press(char.lower())
-            interval = self.config.typing_interval
-            self._random_delay(interval * 0.5, interval * 1.5)
-
-    def press(self, key: str) -> None:
-        """
-        Press a single key.
-
-        Args:
-            key: Key to press (e.g., 'enter', 'escape', 'p').
-        """
-        pydirectinput.press(key)
-        self._random_delay(0.05, 0.15)
-
-    def scroll(self, clicks: int, x: Optional[int] = None, y: Optional[int] = None) -> None:
-        """
-        Scroll the mouse wheel.
-
-        Args:
-            clicks: Number of scroll clicks. Positive = up, negative = down.
-            x: Optional X coordinate to scroll at.
-            y: Optional Y coordinate to scroll at.
-        """
-        if x is not None and y is not None:
-            self.move_to(x, y)
-            self._random_delay(0.05, 0.1)
-
-        pydirectinput.scroll(clicks)
-        self._random_delay(0.1, 0.2)
-
-    # ── High-Level: Move in Lobby Workflow ─────────────────────────────────
-
-    def move_player_via_context_menu(
-            self,
-            player_slot_click: ClickTarget,
-            move_in_lobby_button: ClickTarget,
-            destination_slot_click: ClickTarget,
-    ) -> None:
-        """
-        Move a player to a team/spectator slot using the "Move in Lobby" workflow.
-
-        Steps:
-          1. Click the player's slot in the unassigned list → context menu opens
-          2. Click "Move in Lobby" in the context menu → placement mode
-          3. Click the destination slot → player is moved
-
-        Args:
-            player_slot_click: Where to click to select the player (opens context menu).
-            move_in_lobby_button: The "Move in Lobby" button in the context menu.
-                                  Use context_menu.move_in_lobby_self for the bot,
-                                  or context_menu.move_in_lobby_other for other players.
-            destination_slot_click: The target slot to place the player into
-                                   (e.g., team1_slot1_click, spectator_slot1_click).
-        """
-        # Step 1: Click on the player to open context menu
-        self.click_target(player_slot_click)
-        self._workflow_pause()
-
-        # Step 2: Click "Move in Lobby"
-        self.click_target(move_in_lobby_button)
-        self._workflow_pause()
-
-        # Step 3: Click the destination slot
-        self.click_target(destination_slot_click)
-        self._workflow_pause()
-
-    def move_bot_to_spectator(
-            self,
-            bot_slot_click: ClickTarget,
-            move_in_lobby_self: ClickTarget,
-            spectator_slot_click: ClickTarget,
-    ) -> None:
-        """
-        Move the bot itself to a spectator slot.
-
-        Uses move_in_lobby_self since the bot's context menu has
-        fewer options than other players'.
-
-        Args:
-            bot_slot_click: Where the bot appears in the unassigned list.
-            move_in_lobby_self: The "Move in Lobby" button for the bot.
-            spectator_slot_click: The spectator slot to place the bot into.
-        """
-        self.move_player_via_context_menu(
-            player_slot_click=bot_slot_click,
-            move_in_lobby_button=move_in_lobby_self,
-            destination_slot_click=spectator_slot_click,
-        )
-
-    def move_player_to_team(
-            self,
-            player_slot_click: ClickTarget,
-            move_in_lobby_other: ClickTarget,
-            team_slot_click: ClickTarget,
-    ) -> None:
-        """
-        Move another player to a team slot.
-
-        Uses move_in_lobby_other since other players' context menus have
-        more options than the bot's.
-
-        Args:
-            player_slot_click: Where the player appears in the unassigned list.
-            move_in_lobby_other: The "Move in Lobby" button for other players.
-            team_slot_click: The team slot to place the player into.
-        """
-        self.move_player_via_context_menu(
-            player_slot_click=player_slot_click,
-            move_in_lobby_button=move_in_lobby_other,
-            destination_slot_click=team_slot_click,
-        )
-
-    # ── High-Level: Menu Navigation ────────────────────────────────────────
-
-    def click_sequence(self, *targets: ClickTarget, delay: Optional[float] = None) -> None:
-        """
-        Click a sequence of targets with pauses between each.
-
-        Useful for menu navigation (Play → Private Match → Create Game).
-
-        Args:
-            *targets: ClickTarget instances to click in order.
-            delay: Optional override for the pause between clicks.
-        """
-        for target in targets:
-            self.click_target(target)
-            if delay is not None:
-                time.sleep(delay)
-            else:
-                self._workflow_pause()
-
-    # ── High-Level: Dropdown Selection ─────────────────────────────────────
-
-    def select_from_dropdown(
-            self,
-            dropdown_opener: ClickTarget,
-            option: ClickTarget,
-            scroll_clicks: int = 0,
-    ) -> None:
-        """
-        Open a dropdown and select an option, with optional scrolling.
-
-        Args:
-            dropdown_opener: Click target to open the dropdown.
-            option: Click target for the desired option.
-            scroll_clicks: Number of scroll clicks needed to reach the option.
-                           Positive = scroll up, negative = scroll down.
-        """
-        # Open the dropdown
-        self.click_target(dropdown_opener)
-        self._workflow_pause()
-
-        # Scroll if needed
-        if scroll_clicks != 0:
-            # Scroll at the dropdown's position
-            self.scroll(scroll_clicks, dropdown_opener.x, dropdown_opener.y)
-            self._random_delay(0.2, 0.4)
-
-        # Click the option
-        self.click_target(option)
-        self._workflow_pause()
+    def pause_toggle(self) -> None:
+        self.press("start")
