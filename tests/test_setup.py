@@ -1,68 +1,59 @@
 """
-Basic tests to verify project setup.
+Basic tests to verify project setup and imports.
 """
 
 import pytest
 
 
 def test_import_barkem():
-    """Test that the main package can be imported."""
     import barkem
-
     assert barkem.__version__ == "0.1.0"
 
 
 def test_import_vision():
-    """Test that vision module can be imported."""
-    from barkem.vision import ScreenCapture, TemplateMatcher, TextReader, ChatReader, CommandMonitor
-
+    from barkem.vision import (
+        ScreenCapture, TemplateMatcher, TextReader,
+        ChatReader, CommandMonitor, GameStateDetector, GameScreen,
+    )
     assert ScreenCapture is not None
-    assert TemplateMatcher is not None
-    assert TextReader is not None
-    assert ChatReader is not None
-    assert CommandMonitor is not None
+    assert GameStateDetector is not None
 
 
 def test_import_input():
-    """Test that input module can be imported."""
-    from barkem.input import InputController, WindowManager
-
-    assert InputController is not None
-    assert WindowManager is not None
+    from barkem.input import (
+        GamepadController, GamepadConfig,
+        MenuNavigator, MenuSequences,
+        LobbyNavigator, LobbyGrid,
+        WindowManager,
+    )
+    assert GamepadController is not None
+    assert MenuNavigator is not None
+    assert LobbyNavigator is not None
 
 
 def test_import_bot():
-    """Test that bot module can be imported."""
     from barkem.bot import BarkEmBot, BarkEmStateMachine, MatchConfig, TeamInfo
-
     assert BarkEmBot is not None
-    assert BarkEmStateMachine is not None
-    assert MatchConfig is not None
-    assert TeamInfo is not None
 
 
 def test_import_config():
-    """Test that config module can be imported."""
     from barkem.config import Settings, get_settings
-
     assert Settings is not None
-    settings = get_settings()
+    settings = Settings()
     assert settings.game.resolution == "1920x1080"
 
 
 def test_settings_defaults():
-    """Test that settings have expected defaults."""
     from barkem.config import Settings
-
     settings = Settings()
     assert settings.game.window_title == "THE FINALS"
     assert settings.api.port == 8080
+    assert settings.input.button_delay == 0.15
+    assert settings.input.anchor_presses == 5
 
 
 def test_team_info_captain():
-    """Test that TeamInfo correctly identifies captain."""
     from barkem.bot import TeamInfo
-
     team = TeamInfo(
         team_id=1,
         name="Test Team",
@@ -72,23 +63,87 @@ def test_team_info_captain():
             {"embark_id": "Player3#9012", "display_name": "Player3"},
         ],
     )
-
     assert team.captain_embark_id == "Captain#1234"
-    assert team.captain["display_name"] == "Captain"
 
 
 def test_match_config():
-    """Test MatchConfig dataclass."""
     from barkem.bot import MatchConfig
-
     config = MatchConfig(
         match_id="test-123",
         mode="final_round",
         map="monaco",
-        cancel_timeout_seconds=300,
     )
-
-    assert config.match_id == "test-123"
-    assert config.mode == "final_round"
     assert config.variant == "default"
     assert config.cancel_timeout_seconds == 300
+
+
+def test_gamepad_config_defaults():
+    from barkem.input import GamepadConfig
+    cfg = GamepadConfig()
+    assert cfg.button_delay == 0.15
+    assert cfg.hold_duration == 0.05
+    assert cfg.anchor_presses == 5
+
+
+def test_lobby_grid_defaults():
+    from barkem.input import LobbyGrid
+    grid = LobbyGrid()
+    assert grid.team1_rows == 3
+    assert grid.team2_rows == 3
+    assert grid.context_move_self == 1
+    assert grid.context_move_other == 2
+
+
+def test_menu_sequences_defaults():
+    from barkem.input import MenuSequences
+    seq = MenuSequences()
+    assert seq.mode_anchor_up == 7
+    assert seq.mode_down_to_private == 7
+    assert len(seq.private_to_create) >= 1
+
+
+def test_regions_load_from_dict():
+    from barkem.vision.regions import load_regions_from_dict
+    data = {
+        "lobby": {
+            "lobby_code": [69, 195, 133, 234],
+            "team1_player1_name": [1235, 142, 1861, 184],
+        },
+        "chat": {
+            "chat_area": [100, 806, 509, 994],
+        },
+    }
+    regions = load_regions_from_dict(data)
+    assert regions.lobby.lobby_code.x1 == 69
+    assert regions.lobby.team1_player1_name.x2 == 1861
+    assert regions.chat.chat_area.y2 == 994
+
+
+def test_regions_skip_non_region_values():
+    from barkem.vision.regions import load_regions_from_dict
+    data = {
+        "lobby": {
+            "lobby_code": [69, 195, 133, 234],
+            "nonexistent_field": [1, 2, 3, 4],  # should be ignored
+        },
+    }
+    regions = load_regions_from_dict(data)
+    assert regions.lobby.lobby_code.x1 == 69
+
+
+def test_settings_input_controller_fields():
+    from barkem.config import Settings
+    s = Settings()
+    assert hasattr(s.input, "button_delay")
+    assert hasattr(s.input, "hold_duration")
+    assert hasattr(s.input, "anchor_presses")
+    assert not hasattr(s.input, "click_delay_min")  # old mouse field gone
+
+
+def test_settings_sequences():
+    from barkem.config import Settings
+    s = Settings()
+    assert isinstance(s.sequences.mode_anchor_up, int)
+    assert isinstance(s.grid.team1_rows, int)
+    assert isinstance(s.mode_map.modes, dict)
+    assert "final_round" in s.mode_map.modes

@@ -64,7 +64,7 @@ Thumbs.db
 
 # Templates (user-captured, may contain game assets)
 # Uncomment if you want to track templates in git:
- !templates/.gitkeep
+# !templates/.gitkeep
 #templates/*.png
 #templates/*.jpg
 

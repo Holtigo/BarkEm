@@ -2,14 +2,18 @@
 # Install: pip install -r requirements.txt
 
 # Computer Vision
-dxcam>=0.3.0
+dxcam>=0.3.0; sys_platform == "win32"
 opencv-python>=4.10.0
 pytesseract>=0.3.10
 numpy>=1.24.0
 
-# Input Simulation
-pydirectinput-rgx>=1.0.0
-pywin32>=306
+# Input — Virtual gamepad (platform-specific backend)
+vgamepad>=0.1.0; sys_platform == "win32"
+evdev>=1.7.0; sys_platform == "linux"
+keyboard>=0.13.5
+
+# Windows
+pywin32>=306; sys_platform == "win32"
 
 # State Machine
 python-statemachine>=2.3.0
