@@ -1,12 +1,12 @@
-﻿"""
+"""
 BarkEm Phase 1 — Calibration & Testing Tool
 
 Run this script to:
   1. Capture a screenshot from the game
-  2. Interactively find pixel coordinates (hover to see x,y in title bar)
+  2. Interactively find pixel coordinates for OCR regions
   3. Test OCR on specific regions
   4. Test template matching / state detection
-  5. Visualize all configured regions on a screenshot
+  5. Visualise all configured regions on a screenshot
 
 Usage:
     python -m barkem.tools.calibrate              # Interactive coordinate finder
@@ -22,7 +22,6 @@ Prerequisites:
 
 import argparse
 import os
-import sys
 import time
 
 import cv2
@@ -30,7 +29,6 @@ import numpy as np
 
 
 def get_settings():
-    """Load settings, or return defaults if not configured."""
     try:
         from barkem.config import get_settings
         return get_settings()
@@ -41,7 +39,6 @@ def get_settings():
 
 
 def create_capture():
-    """Create and start a screen capture device."""
     from barkem.vision.capture import ScreenCapture
     cap = ScreenCapture()
     cap.start()
@@ -49,7 +46,6 @@ def create_capture():
 
 
 def capture_screenshot(cap) -> np.ndarray:
-    """Grab a screenshot, retrying a few times."""
     for _ in range(10):
         frame = cap.grab()
         if frame is not None:
@@ -60,17 +56,7 @@ def capture_screenshot(cap) -> np.ndarray:
 
 # ─── Mode: Interactive Coordinate Finder ───────────────────────────────────
 
-
 def run_coordinate_finder():
-    """
-    Capture a screenshot and open it in a window where you can
-    hover your mouse to see coordinates in the title bar.
-
-    Left-click to print coordinates to the console.
-    Right-click to mark a region start/end.
-    Press 'S' to save the current screenshot.
-    Press 'Q' or ESC to quit.
-    """
     print("=" * 60)
     print("  BarkEm Coordinate Finder")
     print("=" * 60)
@@ -102,39 +88,28 @@ def run_coordinate_finder():
     def mouse_callback(event, x, y, flags, param):
         nonlocal region_start, display
 
-        # OpenCV mouse callbacks provide coordinates (x, y) relative to the image
-        actual_x, actual_y = x, y
-
         if event == cv2.EVENT_MOUSEMOVE:
-            cv2.setWindowTitle(
-                window_name,
-                f"BarkEm Calibration ({actual_x}, {actual_y})"
-            )
+            cv2.setWindowTitle(window_name, f"BarkEm Calibration ({x}, {y})")
 
         elif event == cv2.EVENT_LBUTTONDOWN:
-            print(f"  CLICK: ({actual_x}, {actual_y})")
-            click_log.append((actual_x, actual_y))
-            # Draw marker on display
+            print(f"  CLICK: ({x}, {y})")
+            click_log.append((x, y))
             display = frame.copy()
             for cx, cy in click_log:
-                cv2.drawMarker(display, (cx, cy), (0, 0, 255),
-                               cv2.MARKER_CROSS, 20, 2)
+                cv2.drawMarker(display, (cx, cy), (0, 0, 255), cv2.MARKER_CROSS, 20, 2)
             cv2.imshow(window_name, display)
 
         elif event == cv2.EVENT_RBUTTONDOWN:
             if region_start is None:
-                region_start = (actual_x, actual_y)
-                print(f"  REGION START: ({actual_x}, {actual_y})")
+                region_start = (x, y)
+                print(f"  REGION START: ({x}, {y})")
             else:
                 rx1, ry1 = region_start
-                rx2, ry2 = actual_x, actual_y
-                # Normalize
-                x1, y1 = min(rx1, rx2), min(ry1, ry2)
-                x2, y2 = max(rx1, rx2), max(ry1, ry2)
-                print(f"  REGION END:   ({actual_x}, {actual_y})")
+                x1, y1 = min(rx1, x), min(ry1, y)
+                x2, y2 = max(rx1, x), max(ry1, y)
+                print(f"  REGION END:   ({x}, {y})")
                 print(f"  → REGION: [{x1}, {y1}, {x2}, {y2}]")
                 print()
-                # Draw rectangle
                 display = frame.copy()
                 cv2.rectangle(display, (x1, y1), (x2, y2), (0, 255, 0), 2)
                 cv2.imshow(window_name, display)
@@ -145,7 +120,7 @@ def run_coordinate_finder():
 
     while True:
         key = cv2.waitKey(50) & 0xFF
-        if key in (ord('q'), ord('Q'), 27):  # Q or ESC
+        if key in (ord('q'), ord('Q'), 27):
             break
         elif key in (ord('s'), ord('S')):
             os.makedirs("debug/screenshots", exist_ok=True)
@@ -162,12 +137,7 @@ def run_coordinate_finder():
 
 # ─── Mode: Test OCR on Configured Regions ──────────────────────────────────
 
-
 def run_ocr_test():
-    """
-    Capture a screenshot and run OCR on all configured regions.
-    Prints results and saves annotated debug image.
-    """
     print("=" * 60)
     print("  BarkEm OCR Test")
     print("=" * 60)
@@ -179,14 +149,12 @@ def run_ocr_test():
     from barkem.vision.regions import ScreenRegions, Region, load_regions_from_dict
     from barkem.vision.debug import draw_ocr_result, save_debug_screenshot
 
-    # Determine tesseract path
     tesseract_cmd = None
     if settings and hasattr(settings.vision, 'tesseract_cmd'):
         tesseract_cmd = settings.vision.tesseract_cmd
 
     reader = TextReader(tesseract_cmd=tesseract_cmd)
 
-    # Load regions
     regions = ScreenRegions()
     if settings and hasattr(settings, 'regions'):
         regions = load_regions_from_dict(settings.regions)
@@ -197,8 +165,6 @@ def run_ocr_test():
     cap.stop()
 
     annotated = frame.copy()
-
-    # Collect all OCR-able regions
     ocr_targets = []
 
     # Lobby regions
@@ -215,21 +181,20 @@ def run_ocr_test():
         "spectator1_name", "spectator2_name", "spectator3_name",
     ]:
         region = getattr(lobby, name, None)
-        if region and isinstance(region, Region):
-            if region.x1 != 0 or region.y1 != 0 or region.x2 != 0 or region.y2 != 0:
-                ocr_targets.append((f"lobby.{name}", region))
+        if region and isinstance(region, Region) and not region.is_zero:
+            ocr_targets.append((f"lobby.{name}", region))
 
-    # Context menu player name (the clean name shown in the popup)
+    # Context menu player name
     ctx_name = regions.context_menu.player_name
-    if ctx_name.x1 != 0 or ctx_name.x2 != 0:
+    if not ctx_name.is_zero:
         ocr_targets.append(("context_menu.player_name", ctx_name))
 
-    # Chat region
+    # Chat
     chat_area = regions.chat.chat_area
-    if chat_area.x1 != 0 or chat_area.x2 != 0:
+    if not chat_area.is_zero:
         ocr_targets.append(("chat.chat_area", chat_area))
 
-    # Scoreboard regions
+    # Scoreboard
     sb = regions.scoreboard
     for name in [
         "team1_score", "team2_score",
@@ -241,27 +206,23 @@ def run_ocr_test():
         "team2_player3_score_name", "team2_player3_score_value",
     ]:
         region = getattr(sb, name, None)
-        if region and isinstance(region, Region):
-            if region.x1 != 0 or region.y1 != 0 or region.x2 != 0 or region.y2 != 0:
-                ocr_targets.append((f"scoreboard.{name}", region))
+        if region and isinstance(region, Region) and not region.is_zero:
+            ocr_targets.append((f"scoreboard.{name}", region))
 
     if not ocr_targets:
         print()
         print("[!] No regions configured yet.")
         print("    Run 'python -m barkem.tools.calibrate' to find coordinates,")
         print("    then add them to config/settings.yaml under 'regions'.")
-        print()
-        print("    Saving raw screenshot for reference...")
         path = save_debug_screenshot(frame, "ocr_test_raw")
-        print(f"    Saved: {path}")
+        print(f"    Saved raw screenshot: {path}")
         return
 
     print(f"Testing OCR on {len(ocr_targets)} region(s)...")
     print()
 
     for name, region in ocr_targets:
-        # Determine OCR mode
-        if "score_value" in name or "score" in name and "name" not in name:
+        if "score_value" in name or ("score" in name and "name" not in name):
             whitelist = "0123456789"
             mode_label = "digits"
         elif "lobby_code" in name:
@@ -295,12 +256,7 @@ def run_ocr_test():
 
 # ─── Mode: Test State Detection ───────────────────────────────────────────
 
-
 def run_state_test():
-    """
-    Capture a screenshot and test game state detection.
-    Shows which templates were found and which are missing.
-    """
     print("=" * 60)
     print("  BarkEm State Detection Test")
     print("=" * 60)
@@ -310,8 +266,6 @@ def run_state_test():
     from barkem.vision.debug import draw_template_match, save_debug_screenshot
 
     detector = GameStateDetector()
-
-    # Check template availability
     missing = detector.get_missing_templates()
     available = detector.get_available_templates()
 
@@ -331,8 +285,6 @@ def run_state_test():
 
     if not available:
         print("[!] No template images found in templates/ directory.")
-        print("    Capture template images from the game and save as .png files.")
-        print("    See Appendix B in the project report for the full checklist.")
         return
 
     print("Capturing screenshot...")
@@ -341,34 +293,25 @@ def run_state_test():
     cap.stop()
 
     screen, match = detector.detect(frame)
-
     print(f"Detected screen: {screen.name}")
     if match:
         print(f"  Template: {match.template_name}")
         print(f"  Position: ({match.x}, {match.y})")
         print(f"  Confidence: {match.confidence:.3f}")
-
-        annotated = draw_template_match(
-            frame, match.x, match.y, match.template_name, match.confidence
-        )
+        annotated = draw_template_match(frame, match.x, match.y, match.template_name, match.confidence)
         path = save_debug_screenshot(annotated, "state_test")
         print(f"  Saved: {path}")
     else:
-        print("  No template matched. Game may be on an unknown screen.")
+        print("  No template matched.")
         path = save_debug_screenshot(frame, "state_test_unknown")
         print(f"  Raw screenshot saved: {path}")
 
 
 # ─── Mode: Draw All Regions ───────────────────────────────────────────────
 
-
 def run_draw_regions():
-    """
-    Capture a screenshot and draw all configured regions on it.
-    Great for visually verifying your coordinate configuration.
-    """
     print("=" * 60)
-    print("  BarkEm Region Visualizer")
+    print("  BarkEm Region Visualiser")
     print("=" * 60)
     print()
 
@@ -387,16 +330,12 @@ def run_draw_regions():
 
     annotated = draw_all_regions(frame, regions, skip_zero=True)
     path = save_debug_screenshot(annotated, "regions_overlay")
-
     print(f"Annotated screenshot saved: {path}")
-    print("Open this image to verify your region coordinates.")
 
 
 # ─── Mode: Just Screenshot ────────────────────────────────────────────────
 
-
 def run_screenshot():
-    """Just capture and save a screenshot."""
     print("Capturing screenshot...")
     cap = create_capture()
     frame = capture_screenshot(cap)
@@ -411,10 +350,9 @@ def run_screenshot():
 
 # ─── Main ─────────────────────────────────────────────────────────────────
 
-
 def main():
     parser = argparse.ArgumentParser(
-        description="BarkEm Phase 1 — Calibration & Testing Tool",
+        description="BarkEm — Calibration & Testing Tool",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Modes:
@@ -425,10 +363,10 @@ Modes:
   --screenshot     Just capture and save a screenshot
         """,
     )
-    parser.add_argument("--test-ocr", action="store_true", help="Test OCR on configured regions")
-    parser.add_argument("--test-state", action="store_true", help="Test game state detection")
-    parser.add_argument("--draw-regions", action="store_true", help="Draw all regions on screenshot")
-    parser.add_argument("--screenshot", action="store_true", help="Just save a screenshot")
+    parser.add_argument("--test-ocr", action="store_true")
+    parser.add_argument("--test-state", action="store_true")
+    parser.add_argument("--draw-regions", action="store_true")
+    parser.add_argument("--screenshot", action="store_true")
 
     args = parser.parse_args()
 
