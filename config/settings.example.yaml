@@ -1,11 +1,27 @@
 # BarkEm Configuration
-# Copy to settings.yaml and customize
+# Copy to settings.yaml and fill in your coordinates
+#
+# HOW TO FIND COORDINATES:
+#   1. Launch The Finals in Borderless Windowed mode at 1920x1080
+#   2. Run:  python -m barkem.tools.calibrate
+#   3. Hover your mouse over UI elements to see (x, y) in the title bar
+#   4. Left-click to log click targets (single points)
+#   5. Right-click twice to log regions (bounding boxes)
+#   6. Paste the coordinates below
+#
+# FORMAT:
+#   Click targets:  [x, y]           — a single point to click on
+#   Regions:        [x1, y1, x2, y2] — bounding box (top-left to bottom-right)
+#
+# TIP: After filling in coordinates, verify them with:
+#   python -m barkem.tools.calibrate --draw-regions
+
 
 game:
   resolution: "1920x1080"
-  display_mode: "borderless"  # Required for capture
+  display_mode: "borderless"
   window_title: "THE FINALS"
-  bot_embark_id: "BarkEmBot#0000"
+  bot_embark_id: "BarkEmBot#0000"        # ← Your bot account's Embark ID
 
 vision:
   capture_fps: 10
@@ -13,6 +29,9 @@ vision:
   ocr_upscale_factor: 3
   debug_screenshots: true
   screenshot_dir: "./debug/screenshots"
+  # Explicit path to Tesseract — no need to add to system PATH
+  # Change this if you installed Tesseract to a different location
+  tesseract_cmd: "C:\\Program Files\\Tesseract-OCR\\tesseract.exe"
 
 input:
   click_delay_min: 0.1
@@ -47,3 +66,232 @@ logging:
   file: "./logs/bot.log"
   rotation: "10 MB"
   retention: "30 days"
+
+
+# ============================================================================
+#  SCREEN REGIONS — All coordinates the bot needs
+# ============================================================================
+#
+#  Fill in every [x, y] and [x1, y1, x2, y2] below using the calibration tool.
+#  Leave as [0, 0] or [0, 0, 0, 0] for regions you haven't mapped yet.
+#
+#  The bot won't use regions that are still zeroed out.
+#
+# ============================================================================
+
+regions:
+
+  # --------------------------------------------------------------------------
+  #  MAIN MENU — Click targets for navigating to private match
+  # --------------------------------------------------------------------------
+  menu:
+    # The "Play" button on the main menu screen
+    play_button: [1686, 970]
+
+    # The "Private Match" tile/button after clicking Play
+    private_match_tile: [241, 841]
+
+    # The confirm button to enter private match mode
+    private_match_enter_button: [236, 809]
+
+    # The "Create Game" button on the private match screen
+    create_game_button: [1779, 1032]
+
+
+
+    # --------------------------------------------------------------------------
+  #  MODE & MAP SELECTION — Scrollable dropdown click targets
+  # --------------------------------------------------------------------------
+  #
+  #  IMPORTANT: Mode and map selectors are scrollable dropdowns.
+  #  The positions below are where each option appears when visible.
+  #  The bot will need to scroll the dropdown to bring items into view.
+  #
+  #  Selection is instant — clicking an option applies it immediately,
+  #  no confirm button needed.
+  #
+  # --------------------------------------------------------------------------
+  mode_map:
+    # Dropdown openers (click to open the dropdown)
+    mode_selector: [290, 361]
+    map_selector: [290, 477]
+    variant_selector: [290, 573]
+    condition_selector: [290, 670]
+    gameshow_selector: [290, 764]
+
+
+    # ── Mode positions (when mode selector dropdown is open) ──
+    mode_final_round: [290, 400]
+    mode_cashout: [290, 475]
+    mode_quick_cash: [290, 426]
+    mode_head2head: [290, 453]
+    mode_team_deathmatch: [290, 571]
+    mode_power_shift: [290, 550]
+    mode_point_break: [290, 501]
+
+    # ── Map positions (when map selector dropdown is open) ──
+    map_monaco: [290, 540]
+    map_seoul: [290, 635]
+    map_skyway_stadium: [290, 685]
+    map_las_vegas: [290, 664]
+    map_las_vegas_stadium: [290, 495]
+    map_nozomi_citadel: [290, 588]
+    map_sys_horizon: [290, 691]
+    map_kyoto: [290, 620]
+    map_fortune_stadium: [290, 574]
+    map_bernal: [290, 480]
+    map_fangwai_city: [290, 524]
+
+
+    # --------------------------------------------------------------------------
+  #  PLAYER CONTEXT MENU — "Move in Lobby" workflow
+  # --------------------------------------------------------------------------
+  #
+  #  When you click on a player in the unassigned list, a popup appears with:
+  #    - Their name displayed cleanly (good for OCR double-check)
+  #    - A "Move in Lobby" button
+  #
+  #  The "Move in Lobby" button is in a DIFFERENT position for:
+  #    - The bot (self): fewer menu options → button is higher up
+  #    - Other players: more options (kick, etc.) → button is lower
+  #
+  #  After clicking "Move in Lobby", the UI enters placement mode where
+  #  you click a specific slot to place the player there.
+  #
+  # --------------------------------------------------------------------------
+  context_menu:
+    # OCR region for the player name shown in the popup
+    # (same position every time, regardless of which player)
+    player_name: [823, 208, 1107, 249]
+
+    # "Move in Lobby" button position — when clicking the bot itself
+    move_in_lobby_self: [961, 447]
+
+    # "Move in Lobby" button position — when clicking another player
+    move_in_lobby_other: [961, 543]
+
+
+  # --------------------------------------------------------------------------
+  #  LOBBY — Regions for reading names + click targets for player movement
+  # --------------------------------------------------------------------------
+  #
+  #  MOVEMENT FLOW:
+  #    1. Read unassigned_player*_name to find the player in the list
+  #    2. Click unassigned_slot*_click to open their context menu
+  #    3. Read context_menu.player_name for double-check verification
+  #    4. Click context_menu.move_in_lobby_self/other
+  #    5. Click team*_slot*_click or spectator_slot*_click to place them
+  #
+  # --------------------------------------------------------------------------
+  lobby:
+
+    # ── OCR Regions (bounding boxes: [x1, y1, x2, y2]) ──
+    # Draw a tight box around each text element
+
+    # The 4-character lobby code displayed after creating a match
+    lobby_code: [69, 195, 133, 234]
+
+    # Team 1 player name slots
+    team1_player1_name: [1235, 142, 1861, 184]
+    team1_player2_name: [1235, 190, 1861, 232]
+    team1_player3_name: [1235, 237, 1861, 277]
+
+    # Team 2 player name slots
+    team2_player1_name: [1235, 602, 1861, 645]
+    team2_player2_name: [1235, 647, 1861, 690]
+    team2_player3_name: [1235, 696, 1861, 739]
+
+    # Unassigned player pool (center area)
+    # Up to 10 slots for players who joined but aren't on a team yet
+    unassigned_player1_name: [572, 142, 1186, 185]
+    unassigned_player2_name: [572, 189, 1186, 232]
+    unassigned_player3_name: [572, 236, 1186, 279]
+    unassigned_player4_name: [572, 283, 1186, 326]
+    unassigned_player5_name: [572, 330, 1186, 373]
+    unassigned_player6_name: [572, 374, 1186, 417]
+    unassigned_player7_name: [572, 421, 1186, 464]
+    unassigned_player8_name: [572, 468, 1186, 511]
+    unassigned_player9_name: [572, 515, 1186, 558]
+    unassigned_player10_name: [572, 562, 1186, 605]
+
+    # Spectator name slots
+    spectator1_name: [572, 846, 1186, 889]
+    spectator2_name: [572, 893, 1186, 936]
+    spectator3_name: [572, 940, 1186, 983]
+
+    # ── Unassigned Slot Click Targets ──
+    # Click on a player here to open their context menu
+    unassigned_slot1_click: [879, 165]
+    unassigned_slot2_click: [879, 208]
+    unassigned_slot3_click: [879, 251]
+    unassigned_slot4_click: [879, 294]
+    unassigned_slot5_click: [879, 337]
+    unassigned_slot6_click: [879, 380]
+    unassigned_slot7_click: [879, 423]
+    unassigned_slot8_click: [879, 466]
+    unassigned_slot9_click: [879, 509]
+    unassigned_slot10_click: [879, 552]
+
+    # ── Team Slot Destination Targets ──
+    # After clicking "Move in Lobby", click one of these to place the player
+    team1_slot1_click: [1540, 165]
+    team1_slot2_click: [1540, 212]
+    team1_slot3_click: [1540, 257]
+    team2_slot1_click: [1540, 623]
+    team2_slot2_click: [1540, 670]
+    team2_slot3_click: [1540, 718]
+
+    # ── Spectator Slot Destination Targets ──
+    # Where to place the bot (or a player) into spectator during placement mode
+    spectator_slot1_click: [879, 866]
+    spectator_slot2_click: [879, 913]
+    spectator_slot3_click: [879, 962]
+
+    # ── Lobby Buttons ──
+    start_match_button: [1771, 1033]
+
+
+  # --------------------------------------------------------------------------
+  #  CHAT — Region for reading in-game chat messages
+  # --------------------------------------------------------------------------
+  chat:
+    # The entire chat text area (bottom-left corner of the screen)
+    # Make this box cover all visible chat lines
+    chat_area: [100, 806, 509, 994]
+
+
+  # --------------------------------------------------------------------------
+  #  SCOREBOARD — Regions for reading end-of-match results
+  # --------------------------------------------------------------------------
+  scoreboard:
+
+    # Team total scores
+    team1_score: [216, 331, 303, 361]
+    team2_score: [214, 548, 306, 580]
+
+    # Individual player results — Team 1
+    team1_player1_score_name: [0, 0, 0, 0]
+    team1_player1_score_value: [0, 0, 0, 0]
+    team1_player2_score_name: [0, 0, 0, 0]
+    team1_player2_score_value: [0, 0, 0, 0]
+    team1_player3_score_name: [0, 0, 0, 0]
+    team1_player3_score_value: [0, 0, 0, 0]
+
+    # Individual player results — Team 2
+    team2_player1_score_name: [0, 0, 0, 0]
+    team2_player1_score_value: [0, 0, 0, 0]
+    team2_player2_score_name: [0, 0, 0, 0]
+    team2_player2_score_value: [0, 0, 0, 0]
+    team2_player3_score_name: [0, 0, 0, 0]
+    team2_player3_score_value: [0, 0, 0, 0]
+
+    # Return to lobby button on the scoreboard screen
+    return_to_lobby_button: [267, 1037]
+
+
+  # --------------------------------------------------------------------------
+  #  MATCH — Regions used during an active match
+  # --------------------------------------------------------------------------
+  match:
+    # Pause indicator position (if visible on screen during a match)
+    pause_indicator: [0, 0, 0, 0]

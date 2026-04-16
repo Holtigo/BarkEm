@@ -4,7 +4,8 @@ Settings management using Pydantic.
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal, Optional
+import os
 
 import yaml
 from pydantic import BaseModel, Field
@@ -28,6 +29,8 @@ class VisionSettings(BaseModel):
     ocr_upscale_factor: int = 3
     debug_screenshots: bool = True
     screenshot_dir: str = "./debug/screenshots"
+    # Explicit path to tesseract.exe — no need to add Tesseract to PATH
+    tesseract_cmd: str = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 
 
 class InputSettings(BaseModel):
@@ -58,7 +61,7 @@ class MonitoringSettings(BaseModel):
     mid_poll_interval: int = 30
     late_poll_interval: int = 10
     late_threshold_seconds: int = 600
-    chat_poll_interval: float = 1.0  # How often to check chat for commands
+    chat_poll_interval: float = 1.0
 
 
 class APISettings(BaseModel):
@@ -95,15 +98,20 @@ class Settings(BaseSettings):
     api: APISettings = Field(default_factory=APISettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
 
-    @classmethod
-    def from_yaml(cls, path: str | Path) -> "Settings":
-        """Load settings from YAML file."""
-        path = Path(path)
-        if not path.exists():
-            return cls()
+    # Screen regions — raw dict from YAML, parsed by vision/regions.py
+    regions: dict[str, Any] = Field(default_factory=dict)
 
-        with open(path) as f:
+    @classmethod
+    def from_yaml(cls, path: str = "config/settings.yaml") -> "Settings":
+        """Load settings from a YAML file."""
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"Settings file not found: {path}")
+
+        with open(path, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
+
+        # Set game resolution for parsing regions
+        cls.model_config["game__regions__resolution"] = cls.model_config.get("game__resolution", "1920x1080")
 
         return cls(**data)
 
