@@ -64,6 +64,23 @@ class ContextMenuRegions:
     player_name: Region = field(default_factory=_ZERO)
 
 
+# ── Dropdowns (match details column) ──────────────────────────────────────
+
+@dataclass
+class DropdownRegions:
+    """
+    OCR regions for the *currently displayed value* of each dropdown
+    in the LEFT (match details) column.  Used to verify a dropdown
+    actually applied the selection (GeForce NOW lag can drop inputs).
+    """
+
+    game_mode: Region = field(default_factory=_ZERO)
+    arena: Region = field(default_factory=_ZERO)
+    variant: Region = field(default_factory=_ZERO)
+    condition: Region = field(default_factory=_ZERO)
+    game_show: Region = field(default_factory=_ZERO)
+
+
 # ── Lobby ─────────────────────────────────────────────────────────────────
 
 @dataclass
@@ -155,6 +172,7 @@ class ScreenRegions:
     """All OCR regions for a specific resolution."""
 
     context_menu: ContextMenuRegions = field(default_factory=ContextMenuRegions)
+    dropdowns: DropdownRegions = field(default_factory=DropdownRegions)
     lobby: LobbyRegions = field(default_factory=LobbyRegions)
     chat: ChatRegions = field(default_factory=ChatRegions)
     scoreboard: ScoreboardRegions = field(default_factory=ScoreboardRegions)
@@ -174,6 +192,7 @@ def load_regions_from_dict(data: dict) -> ScreenRegions:
 
     group_map = {
         "context_menu": regions.context_menu,
+        "dropdowns": regions.dropdowns,
         "lobby": regions.lobby,
         "chat": regions.chat,
         "scoreboard": regions.scoreboard,

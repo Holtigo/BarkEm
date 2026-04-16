@@ -72,6 +72,11 @@ grid:
   context_move_self: 2    # for the bot's own context menu
   context_move_other: 3   # for other players' context menus
 
+  # Dropdown anchoring — UP presses to guarantee index 0 inside an
+  # open dropdown (game mode, map, variant, condition, game show).
+  # Dropdowns don't wrap, so spamming past the top is safe.
+  dropdown_anchor_up: 14
+
 
 # ── Mode & map dropdown indices ───────────────────────────────────────────
 # Zero-based: after opening the dropdown (A), press Down this many times.
@@ -145,6 +150,17 @@ regions:
 
   context_menu:
     player_name: [823, 208, 1107, 249]
+
+  # OCR boxes around the *currently displayed value* of each dropdown
+  # in the LEFT (match details) column.  Used to verify that a
+  # selection actually applied — GeForce NOW lag can drop D-pad inputs.
+  # Leave at [0,0,0,0] to skip verification for that dropdown.
+  dropdowns:
+    game_mode: [63, 332, 375, 385]
+    arena:     [63, 452, 375, 500]
+    variant:   [63, 550, 375, 598]
+    condition: [63, 644, 375, 693]
+    game_show: [63, 742, 375, 788]
 
   lobby:
     lobby_code: [69, 195, 133, 234]

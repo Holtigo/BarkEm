@@ -119,6 +119,15 @@ python -m barkem.tools.calibrate --test-state
 
 # Draw all configured regions on a screenshot
 python -m barkem.tools.calibrate --draw-regions
+
+# Continuously poll the detected game state (every 3s by default)
+python -m barkem.tools.state_watch
+
+# Phase 2 — end-to-end lobby creation test
+python -m barkem.tools.create_lobby --mode final_round --map monaco
+python -m barkem.tools.create_lobby --focus-only       # just verify window focus
+python -m barkem.tools.create_lobby --nav-only         # just menu nav, no OCR
+python -m barkem.tools.create_lobby --read-code-only   # OCR lobby code from current screen
 ```
 
 ## Usage
@@ -187,7 +196,30 @@ barkem/
 
 **Phase 1 complete** — Vision foundation + controller input refactor.
 
-**Phase 2 in progress** — XInput controller navigation and lobby creation.
+**Phase 2 complete** — Window focus, menu navigation, lobby creation,
+mode/map dropdown selection with OCR verification + retry, lobby code
+OCR.
+
+**Phase 3 next** — Team placement (OCR player names, place into team
+slots via D-pad).
+
+### Mode / map / variant relationships
+
+A few things to know when configuring a match:
+
+- **Map pool varies by game mode.** Most competitive modes (Final
+  Round, Cashout, Quick Cash, Head2Head) share the same pool, but some
+  modes restrict it. The current config assumes the standard pool —
+  per-mode map lists may need to be added later.
+- **Variants, conditions, and game shows are per-map.** Each map
+  exposes a different set of options, and some maps don't have one or
+  more of these dropdowns at all. Use index `0` ("ANY"/default) as the
+  safe choice unless you've calibrated per-map indices.
+- **Dropdowns are anchored before each selection.** The bot opens a
+  dropdown, presses UP×14 to guarantee index 0, then DOWN×N to the
+  target. After confirming, it OCRs the displayed value and retries up
+  to 3 times — important on GeForce NOW where input lag occasionally
+  drops D-pad presses.
 
 ## Legal Disclaimer
 

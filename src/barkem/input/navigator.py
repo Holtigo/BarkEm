@@ -224,6 +224,12 @@ class LobbyGrid:
     context_move_self: int = 1   # when selecting the bot itself
     context_move_other: int = 2  # when selecting another player
 
+    # ── Dropdown anchoring ────────────────────────────────────────────
+    # UP presses to guarantee the cursor is at index 0 inside an open
+    # dropdown (mode, map, variant, condition, game show).  Dropdowns
+    # don't wrap, so spamming UP past the top is harmless.
+    dropdown_anchor_up: int = 14
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  LOBBY NAVIGATOR
@@ -346,6 +352,11 @@ class LobbyNavigator:
         """
         Open a dropdown and pick an option by index.
 
+        Anchors to index 0 first by spamming UP (``dropdown_anchor_up``
+        presses) — dropdown lists don't wrap, so this guarantees we're
+        at the top regardless of any previously-highlighted entry.
+        Then counts DOWN to the target.
+
         Args:
             dropdown: Which dropdown (GAME_MODE, ARENA, etc.).
             option_index: Zero-based position of the desired option.
@@ -353,6 +364,11 @@ class LobbyNavigator:
         self.go_to_dropdown(dropdown)
         self.ctrl.confirm()
         time.sleep(self.step_wait)
+
+        # Anchor to top of the dropdown list
+        self.ctrl.press("up", self.grid.dropdown_anchor_up)
+        time.sleep(self.step_wait)
+
         if option_index > 0:
             self.ctrl.press("down", option_index)
         self.ctrl.confirm()

@@ -136,6 +136,7 @@ class BarkEmBot:
         self._gamepad = None
         self._menu_nav = None
         self._lobby_nav = None
+        self._lobby_creator = None
 
     def _init_input(self):
         """Create controller, vision, and navigators from settings."""
@@ -146,6 +147,11 @@ class BarkEmBot:
         )
         from barkem.vision.capture import ScreenCapture
         from barkem.vision.templates import TemplateMatcher
+        from barkem.vision.ocr import TextReader
+        from barkem.vision.regions import load_regions_from_dict
+        from barkem.vision.state_detector import GameStateDetector
+        from barkem.bot.lobby import LobbyCreator
+        from barkem.input.window import WindowManager
 
         cfg = self.settings.input
         pad_cfg = GamepadConfig(
@@ -186,8 +192,31 @@ class BarkEmBot:
                 gap_between_teams=grid.gap_between_teams,
                 context_move_self=grid.context_move_self,
                 context_move_other=grid.context_move_other,
+                dropdown_anchor_up=grid.dropdown_anchor_up,
             ),
             step_wait=cfg.step_wait,
+        )
+
+        # Phase 2 — vision pieces for lobby creation + code OCR
+        self._text_reader = TextReader(
+            upscale_factor=self.settings.vision.ocr_upscale_factor,
+            tesseract_cmd=self.settings.vision.tesseract_cmd,
+        )
+        self._regions = load_regions_from_dict(self.settings.regions)
+        self._detector = GameStateDetector(
+            threshold=self.settings.vision.template_threshold,
+        )
+        self._window = WindowManager(window_title=self.settings.game.window_title)
+        self._lobby_creator = LobbyCreator(
+            menu_nav=self._menu_nav,
+            lobby_nav=self._lobby_nav,
+            capture=self._capture,
+            text_reader=self._text_reader,
+            regions=self._regions,
+            state_detector=self._detector,
+            mode_indices=self.settings.mode_map.modes,
+            map_indices=self.settings.mode_map.maps,
+            window_manager=self._window,
         )
 
     @property
@@ -208,14 +237,23 @@ class BarkEmBot:
         self.current_match = MatchState(config=config, team1=team1, team2=team2)
         self.state_machine.receive_match_request()
 
-        # TODO: Navigate to private match, select mode/map, create lobby, OCR code
-        lobby_code = "XXXX"
-        self.current_match.lobby_code = lobby_code
+        if self._lobby_creator is None:
+            self._init_input()
+
+        result = self._lobby_creator.create_and_read_code(
+            mode=config.mode,
+            map_name=config.map,
+        )
+        if not result.success:
+            self.current_match.status = MatchStatus.ERROR
+            raise RuntimeError(f"Lobby creation failed: {result.error}")
+
+        self.current_match.lobby_code = result.lobby_code
         self.current_match.status = MatchStatus.LOBBY_CREATED
         self.state_machine.lobby_created()
 
         self._start_cancel_timeout(config.cancel_timeout_seconds)
-        return lobby_code
+        return result.lobby_code
 
     def _start_cancel_timeout(self, seconds: int) -> None:
         if self._cancel_timeout_task:

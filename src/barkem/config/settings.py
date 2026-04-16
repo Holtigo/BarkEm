@@ -72,6 +72,10 @@ class GridSettings(BaseModel):
     context_move_self: int = 1   # D-pad Downs for bot's own context menu
     context_move_other: int = 2  # D-pad Downs for other players
 
+    # Dropdown anchoring — UP presses to guarantee the cursor is at
+    # index 0 inside an open dropdown (mode, map, variant, etc.).
+    dropdown_anchor_up: int = 14
+
 
 class ModeMapIndexSettings(BaseModel):
     """
