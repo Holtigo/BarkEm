@@ -15,8 +15,9 @@ Keybindings:
     Tab         →  Back / Select
     X           →  X button
     Y           →  Y button
-    L           →  LB
-    R           →  RB
+    L           →  LB             R           →  RB
+    ,           →  LT             .           →  RT
+    [           →  LS (click)     ]           →  RS (click)
     Escape      →  Quit
 
 Requires: pip install keyboard vgamepad
@@ -43,6 +44,7 @@ except ImportError:
 
 # ── Key → Button mapping ─────────────────────────────────────────────────
 
+# Button keys — a simple press_button() works for these.
 KEYMAP = {
     "up":        vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_UP,
     "down":      vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_DOWN,
@@ -56,6 +58,15 @@ KEYMAP = {
     "y":         vg.XUSB_BUTTON.XUSB_GAMEPAD_Y,
     "l":         vg.XUSB_BUTTON.XUSB_GAMEPAD_LEFT_SHOULDER,
     "r":         vg.XUSB_BUTTON.XUSB_GAMEPAD_RIGHT_SHOULDER,
+    "[":         vg.XUSB_BUTTON.XUSB_GAMEPAD_LEFT_THUMB,
+    "]":         vg.XUSB_BUTTON.XUSB_GAMEPAD_RIGHT_THUMB,
+}
+
+# Trigger keys — triggers are analog axes in XInput, so pulse them
+# to max and back to 0 instead of using press_button().
+TRIGGERMAP = {
+    ",": "left_trigger",
+    ".": "right_trigger",
 }
 
 HOLD_MS = 80          # how long the virtual button stays held (ms)
@@ -70,6 +81,7 @@ def main():
     print("  Arrows → D-pad    Enter → A    Backspace → B")
     print("  Space  → Start    Tab   → Back")
     print("  X → X   Y → Y    L → LB   R → RB")
+    print("  , → LT  . → RT    [ → LS (click)   ] → RS (click)")
     print()
     print("  Keys are SUPPRESSED — they won't reach the game as")
     print("  keyboard input (no accidental chat opens).")
@@ -97,18 +109,27 @@ def main():
                 return  # too soon, ignore repeat
             last_press[key] = now
 
-        btn = KEYMAP[key]
-        pad.press_button(btn)
-        pad.update()
         label = key.upper().rjust(10)
         print(f"  ▼ {label}")
-        time.sleep(HOLD_MS / 1000)
-        pad.release_button(btn)
-        pad.update()
+
+        if key in TRIGGERMAP:
+            axis = TRIGGERMAP[key]
+            getattr(pad, axis)(value=255)
+            pad.update()
+            time.sleep(HOLD_MS / 1000)
+            getattr(pad, axis)(value=0)
+            pad.update()
+        else:
+            btn = KEYMAP[key]
+            pad.press_button(btn)
+            pad.update()
+            time.sleep(HOLD_MS / 1000)
+            pad.release_button(btn)
+            pad.update()
 
     # Register each key individually with suppress=True so the
     # original keystroke never reaches the foreground window.
-    for key_name in KEYMAP:
+    for key_name in list(KEYMAP) + list(TRIGGERMAP):
         keyboard.on_press_key(key_name, lambda e, k=key_name: tap(k), suppress=True)
 
     try:

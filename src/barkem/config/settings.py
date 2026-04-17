@@ -42,9 +42,9 @@ class InputSettings(BaseModel):
 class SequenceSettings(BaseModel):
     """Menu navigation config."""
 
-    # Game mode selection screen — anchorable
-    mode_anchor_up: int = 7        # UP presses to guarantee top of list
-    mode_down_to_private: int = 7  # DOWN presses from top to Private Match
+    # Game mode selection screen — cursor starts at top on entry, so
+    # just DOWN×N to reach Private Match.
+    mode_down_to_private: int = 7
 
     # Private Match screen → Create Game
     private_to_create: list[str] = Field(default_factory=lambda: ["a"])

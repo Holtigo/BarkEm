@@ -25,6 +25,7 @@ class GamepadConfig:
     hold_duration: float = 0.05
     anchor_presses: int = 5
     anchor_settle: float = 0.3
+    verbose: bool = False  # print every button press
 
 
 # ── Abstract backend ──────────────────────────────────────────────────────
@@ -69,6 +70,10 @@ class _WindowsBackend(_GamepadBackend):
             "right": vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_RIGHT,
             "lb": vg.XUSB_BUTTON.XUSB_GAMEPAD_LEFT_SHOULDER,
             "rb": vg.XUSB_BUTTON.XUSB_GAMEPAD_RIGHT_SHOULDER,
+            "ls": vg.XUSB_BUTTON.XUSB_GAMEPAD_LEFT_THUMB,
+            "rs": vg.XUSB_BUTTON.XUSB_GAMEPAD_RIGHT_THUMB,
+            # Triggers ("lt"/"rt") aren't buttons in XInput — they're
+            # analog axes.  Handled specially in press/release below.
         }
         self._pad = vg.VX360Gamepad()
         self._pad.reset()
@@ -81,10 +86,20 @@ class _WindowsBackend(_GamepadBackend):
             self._pad = None
 
     def press_button(self, button: str) -> None:
+        if button in ("lt", "rt"):
+            which = "left_trigger" if button == "lt" else "right_trigger"
+            getattr(self._pad, which)(value=255)
+            self._pad.update()
+            return
         self._pad.press_button(self._button_map[button])
         self._pad.update()
 
     def release_button(self, button: str) -> None:
+        if button in ("lt", "rt"):
+            which = "left_trigger" if button == "lt" else "right_trigger"
+            getattr(self._pad, which)(value=0)
+            self._pad.update()
+            return
         self._pad.release_button(self._button_map[button])
         self._pad.update()
 
@@ -110,11 +125,16 @@ class _LinuxBackend(_GamepadBackend):
             "back": ecodes.BTN_SELECT,
             "lb": ecodes.BTN_TL,
             "rb": ecodes.BTN_TR,
+            "ls": ecodes.BTN_THUMBL,
+            "rs": ecodes.BTN_THUMBR,
             # D-pad uses ABS hat axes, handled specially
             "up": "hat_up",
             "down": "hat_down",
             "left": "hat_left",
             "right": "hat_right",
+            # Triggers are ABS axes, handled specially
+            "lt": "trigger_left",
+            "rt": "trigger_right",
         }
 
         capabilities = {
@@ -123,10 +143,13 @@ class _LinuxBackend(_GamepadBackend):
                 ecodes.BTN_WEST, ecodes.BTN_NORTH,
                 ecodes.BTN_START, ecodes.BTN_SELECT,
                 ecodes.BTN_TL, ecodes.BTN_TR,
+                ecodes.BTN_THUMBL, ecodes.BTN_THUMBR,
             ],
             ecodes.EV_ABS: [
                 (ecodes.ABS_HAT0X, AbsInfo(0, -1, 1, 0, 0, 0)),
                 (ecodes.ABS_HAT0Y, AbsInfo(0, -1, 1, 0, 0, 0)),
+                (ecodes.ABS_Z,  AbsInfo(0, 0, 255, 0, 0, 0)),   # LT
+                (ecodes.ABS_RZ, AbsInfo(0, 0, 255, 0, 0, 0)),   # RT
             ],
         }
 
@@ -154,6 +177,10 @@ class _LinuxBackend(_GamepadBackend):
             self._device.write(ecodes.EV_ABS, ecodes.ABS_HAT0X, -1)
         elif mapped == "hat_right":
             self._device.write(ecodes.EV_ABS, ecodes.ABS_HAT0X, 1)
+        elif mapped == "trigger_left":
+            self._device.write(ecodes.EV_ABS, ecodes.ABS_Z, 255)
+        elif mapped == "trigger_right":
+            self._device.write(ecodes.EV_ABS, ecodes.ABS_RZ, 255)
         else:
             self._device.write(ecodes.EV_KEY, mapped, 1)
         self._device.syn()
@@ -166,6 +193,10 @@ class _LinuxBackend(_GamepadBackend):
             self._device.write(ecodes.EV_ABS, ecodes.ABS_HAT0Y, 0)
         elif mapped in ("hat_left", "hat_right"):
             self._device.write(ecodes.EV_ABS, ecodes.ABS_HAT0X, 0)
+        elif mapped == "trigger_left":
+            self._device.write(ecodes.EV_ABS, ecodes.ABS_Z, 0)
+        elif mapped == "trigger_right":
+            self._device.write(ecodes.EV_ABS, ecodes.ABS_RZ, 0)
         else:
             self._device.write(ecodes.EV_KEY, mapped, 0)
         self._device.syn()
@@ -173,7 +204,11 @@ class _LinuxBackend(_GamepadBackend):
 
 # ── Public controller (backend-agnostic) ──────────────────────────────────
 
-VALID_BUTTONS = {"a", "b", "x", "y", "start", "back", "up", "down", "left", "right", "lb", "rb"}
+VALID_BUTTONS = {
+    "a", "b", "x", "y", "start", "back",
+    "up", "down", "left", "right",
+    "lb", "rb", "ls", "rs", "lt", "rt",
+}
 
 
 def _create_backend() -> _GamepadBackend:
@@ -218,6 +253,8 @@ class GamepadController:
 
     def press(self, button: str, count: int = 1) -> None:
         button = button.lower()
+        if self.config.verbose:
+            print(f"    [pad] press {button.upper()} ×{count}")
         for _ in range(count):
             self.backend.press_button(button)
             time.sleep(self.config.hold_duration)
@@ -246,3 +283,28 @@ class GamepadController:
 
     def pause_toggle(self) -> None:
         self.press("start")
+
+    # ── Lobby-slot move shortcuts (on a highlighted player) ───────────
+    # These map to the game's in-lobby D-pad shortcut buttons:
+    #   LS       → move to Unassigned
+    #   RS       → move to Spectator
+    #   LB / RB  → move to Team 1 / Team 2
+    #   LT / RT  → move to Team 3 / Team 4 (4-team modes only)
+    MOVE_BUTTON = {
+        "unassigned": "ls",
+        "spectator": "rs",
+        "team1": "lb",
+        "team2": "rb",
+        "team3": "lt",
+        "team4": "rt",
+    }
+
+    def move_highlighted_to(self, destination: str) -> None:
+        """Send the currently-highlighted player to ``destination``."""
+        btn = self.MOVE_BUTTON.get(destination)
+        if btn is None:
+            raise ValueError(
+                f"Unknown move destination {destination!r}. "
+                f"Expected one of: {list(self.MOVE_BUTTON)}"
+            )
+        self.press(btn)

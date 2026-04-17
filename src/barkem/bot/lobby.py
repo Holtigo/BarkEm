@@ -72,6 +72,7 @@ class LobbyCreator:
         verify_fuzzy_threshold: int = 75,
         window_manager: Optional[WindowManager] = None,
         focus_settle: float = 0.5,
+        verbose: bool = False,
     ):
         self.menu = menu_nav
         self.lobby = lobby_nav
@@ -87,6 +88,11 @@ class LobbyCreator:
         self.verify_fuzzy_threshold = verify_fuzzy_threshold
         self.window = window_manager
         self.focus_settle = focus_settle
+        self.verbose = verbose
+
+    def _log(self, msg: str) -> None:
+        if self.verbose:
+            print(msg, flush=True)
 
     # ── Public API ──────────────────────────────────────────────────────
 
@@ -96,6 +102,7 @@ class LobbyCreator:
         map_name: Optional[str] = None,
     ) -> LobbyCreationResult:
         """End-to-end: focus game, navigate from main menu, create lobby, return code."""
+        self._log("\n=== [step 1] Focus game window ===")
         if self.window is not None:
             if not self.window.focus():
                 return LobbyCreationResult(
@@ -105,35 +112,54 @@ class LobbyCreator:
                         f"{self.window.window_title!r}."
                     ),
                 )
+            self._log(f"    focused OK → sleeping {self.focus_settle}s")
             time.sleep(self.focus_settle)
 
+        self._log("\n=== [step 2] Main Menu → Change Game Mode → Private Match → Create ===")
         if not self.menu.go_to_create_game():
             return LobbyCreationResult(
                 success=False,
                 error="Could not navigate to Create Game (template not found).",
             )
+        self._log("    menu navigation OK")
 
+        self._log(f"\n=== [step 3] Waiting for LOBBY screen (timeout={self.lobby_settle_timeout}s) ===")
         if not self._wait_for_lobby():
             return LobbyCreationResult(
                 success=False,
                 error=f"Lobby screen not detected within {self.lobby_settle_timeout}s.",
             )
+        self._log("    LOBBY detected")
+
+        # NOTE: we deliberately do NOT move the bot to spectator here.
+        # The bot stays in the unassigned list so that after editing a
+        # dropdown and pressing RIGHT back into the center column, the
+        # cursor always lands on the first unassigned slot — which is
+        # the bot, since it's the only unassigned player at creation.
+        # This gives later placement code a reliable anchor without
+        # needing highlight detection.
 
         if mode:
+            self._log(f"\n=== [step 4] Select game mode: {mode!r} ===")
             ok, err = self._select_with_verify(
                 DropdownSlot.GAME_MODE, mode, self.mode_indices,
             )
             if not ok:
                 return LobbyCreationResult(success=False, error=err)
+            self._log("    mode OK")
 
         if map_name:
+            self._log(f"\n=== [step 5] Select map: {map_name!r} ===")
             ok, err = self._select_with_verify(
                 DropdownSlot.ARENA, map_name, self.map_indices,
             )
             if not ok:
                 return LobbyCreationResult(success=False, error=err)
+            self._log("    map OK")
 
+        self._log("\n=== [step 6] Read lobby code via OCR ===")
         code = self.read_lobby_code()
+        self._log(f"    OCR lobby code: {code!r}")
         if not code or len(code) < 4:
             return LobbyCreationResult(
                 success=False,

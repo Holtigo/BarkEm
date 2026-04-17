@@ -49,8 +49,7 @@ class MenuSequences:
     the top, then DOWN×7 reaches Private Match.
     """
 
-    # Game mode screen → anchor to top, then down to Private Match
-    mode_anchor_up: int = 7
+    # Game mode screen → already sits at top on entry, just DOWN to Private Match
     mode_down_to_private: int = 7
 
     # Private Match screen → Create Game (usually just confirm)
@@ -124,11 +123,11 @@ class MenuNavigator:
             outline visible.  Capture this at your resolution.
         """
         # ── Step 1: Main menu → find "Change Game Mode" ──────────────
-        # The main menu wraps, so just press UP until the template
-        # matches (it's the last item in the right column — UP wraps
-        # to it from the top).
+        # The main menu wraps, so press DOWN until the template matches.
+        # DOWN is usually faster than UP to reach Change Game Mode from
+        # the default cursor position.
         found = self.navigate_to_template(
-            direction="up",
+            direction="down",
             template_name="change_game_mode_selected",
             max_presses=15,
         )
@@ -139,9 +138,8 @@ class MenuNavigator:
         time.sleep(self.transition_wait)
 
         # ── Step 2: Game mode screen → Private Match ─────────────────
-        # This screen CAN be anchored: UP×7 to top, DOWN×7 to PM.
-        self.ctrl.press("up", self.seq.mode_anchor_up)
-        time.sleep(0.1)
+        # The cursor always lands on the top entry when this screen
+        # opens, so no anchor needed — just DOWN×N to Private Match.
         self.ctrl.press("down", self.seq.mode_down_to_private)
         self.ctrl.confirm()
         time.sleep(self.transition_wait)
@@ -375,84 +373,25 @@ class LobbyNavigator:
         time.sleep(self.step_wait)
         self._row = dropdown.value
 
-    # ── Player placement ──────────────────────────────────────────────
+    # ── Player placement (shortcut-button flow) ───────────────────────
+    #
+    # With the highlighted player selected in the unassigned column, the
+    # game provides direct move shortcuts — no context menu needed:
+    #   LS  → Unassigned      RS  → Spectator
+    #   LB  → Team 1          RB  → Team 2
+    #   LT  → Team 3          RT  → Team 4
+    #
+    # After the press, the moved player leaves the unassigned list, every
+    # row below shifts up, and the cursor stays on the same screen slot —
+    # which now contains the next player.  So placement is top-down:
+    # press once per expected player, no re-navigation between presses.
 
-    def _open_move_in_lobby(self, unassigned_slot: int, is_bot: bool) -> None:
+    def move_highlighted(self, destination: str) -> None:
         """
-        Navigate to a player, open context menu, select "Move in Lobby".
+        Send the currently-highlighted slot to *destination*.
 
-        Args:
-            unassigned_slot: 0-based row in the unassigned list.
-            is_bot: True if selecting the bot itself (fewer menu items).
+        destination ∈ {"unassigned", "spectator", "team1", "team2",
+                       "team3", "team4"}.
         """
-        self.anchor()
-        self.go_to_row(unassigned_slot)
-        time.sleep(self.step_wait)
-
-        # Open context menu
-        self.ctrl.confirm()
-        time.sleep(self.step_wait)
-
-        # Navigate to "Move in Lobby" (different offset for bot vs others)
-        offset = self.grid.context_move_self if is_bot else self.grid.context_move_other
-        self.ctrl.press("down", offset)
-        self.ctrl.confirm()
-        time.sleep(self.step_wait)
-
-    def move_player_to_team(
-        self,
-        unassigned_slot: int,
-        team: int,
-        team_slot: int,
-        is_bot: bool = False,
-    ) -> None:
-        """
-        Move a player from the unassigned list to a team slot.
-
-        Args:
-            unassigned_slot: 0-based index in the unassigned list.
-            team: 1 or 2.
-            team_slot: 0-based position within the team.
-            is_bot: True if moving the bot itself.
-        """
-        self._open_move_in_lobby(unassigned_slot, is_bot)
-
-        # Placement mode — RIGHT to teams column, DOWN to slot
-        self.ctrl.press("right")
-        time.sleep(self.step_wait)
-
-        if team == 1:
-            target_row = team_slot
-        else:
-            target_row = self.grid.team1_rows + self.grid.gap_between_teams + team_slot
-
-        if target_row > 0:
-            self.ctrl.press("down", target_row)
-
-        self.ctrl.confirm()
-        time.sleep(self.step_wait)
-
-    def move_bot_to_spectator(
-        self,
-        bot_slot: int,
-        unassigned_total: int,
-        spectator_slot: int = 0,
-    ) -> None:
-        """
-        Move the bot to a spectator slot.
-
-        Args:
-            bot_slot: 0-based row where the bot sits in unassigned.
-            unassigned_total: total visible unassigned rows (players
-                              + empty slots).
-            spectator_slot: 0-based spectator slot (0, 1, or 2).
-        """
-        self._open_move_in_lobby(bot_slot, is_bot=True)
-
-        # In placement mode, spectators are below unassigned in CENTER.
-        spec_row = unassigned_total + spectator_slot
-        if spec_row > 0:
-            self.ctrl.press("down", spec_row)
-
-        self.ctrl.confirm()
+        self.ctrl.move_highlighted_to(destination)
         time.sleep(self.step_wait)

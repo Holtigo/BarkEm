@@ -122,6 +122,37 @@ class LobbyRegions:
     spectator2_name: Region = field(default_factory=_ZERO)
     spectator3_name: Region = field(default_factory=_ZERO)
 
+    # ── Named iterators (used by highlight detection, OCR, etc.) ──
+    def unassigned_slots(self) -> list[tuple[str, Region]]:
+        """Return (name, region) pairs for every defined unassigned slot."""
+        out = []
+        for i in range(1, 11):
+            r = getattr(self, f"unassigned_player{i}_name")
+            if not r.is_zero:
+                out.append((f"unassigned{i}", r))
+        return out
+
+    def spectator_slots(self) -> list[tuple[str, Region]]:
+        out = []
+        for i in range(1, 4):
+            r = getattr(self, f"spectator{i}_name")
+            if not r.is_zero:
+                out.append((f"spectator{i}", r))
+        return out
+
+    def team_slots(self) -> list[tuple[str, Region]]:
+        out = []
+        for team in (1, 2):
+            for i in range(1, 4):
+                r = getattr(self, f"team{team}_player{i}_name")
+                if not r.is_zero:
+                    out.append((f"team{team}_player{i}", r))
+        return out
+
+    def all_player_slots(self) -> list[tuple[str, Region]]:
+        """All lobby slots a D-pad cursor can land on (for highlight detection)."""
+        return self.unassigned_slots() + self.spectator_slots() + self.team_slots()
+
 
 # ── Chat ──────────────────────────────────────────────────────────────────
 

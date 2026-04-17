@@ -137,6 +137,8 @@ class BarkEmBot:
         self._menu_nav = None
         self._lobby_nav = None
         self._lobby_creator = None
+        self._lobby_reader = None
+        self._team_placer = None
 
     def _init_input(self):
         """Create controller, vision, and navigators from settings."""
@@ -151,7 +153,9 @@ class BarkEmBot:
         from barkem.vision.regions import load_regions_from_dict
         from barkem.vision.state_detector import GameStateDetector
         from barkem.bot.lobby import LobbyCreator
+        from barkem.bot.placement import TeamPlacer
         from barkem.input.window import WindowManager
+        from barkem.vision.lobby_reader import LobbyReader
 
         cfg = self.settings.input
         pad_cfg = GamepadConfig(
@@ -176,7 +180,6 @@ class BarkEmBot:
             capture=self._capture,
             matcher=self._matcher,
             sequences=MenuSequences(
-                mode_anchor_up=seq.mode_anchor_up,
                 mode_down_to_private=seq.mode_down_to_private,
                 private_to_create=seq.private_to_create,
             ),
@@ -207,6 +210,18 @@ class BarkEmBot:
             threshold=self.settings.vision.template_threshold,
         )
         self._window = WindowManager(window_title=self.settings.game.window_title)
+        self._lobby_reader = LobbyReader(
+            ocr=self._text_reader,
+            lobby=self._regions.lobby,
+            context_menu=self._regions.context_menu,
+        )
+        self._team_placer = TeamPlacer(
+            lobby_nav=self._lobby_nav,
+            lobby_reader=self._lobby_reader,
+            capture=self._capture,
+            bot_embark_id=self.settings.game.bot_embark_id,
+            step_wait=cfg.step_wait,
+        )
         self._lobby_creator = LobbyCreator(
             menu_nav=self._menu_nav,
             lobby_nav=self._lobby_nav,
@@ -254,6 +269,37 @@ class BarkEmBot:
 
         self._start_cancel_timeout(config.cancel_timeout_seconds)
         return result.lobby_code
+
+    async def place_teams(self) -> "PlacementResult":
+        """
+        Phase 3 — scan the lobby and move expected players onto their teams.
+
+        Must be called once all 6 expected players have joined the lobby,
+        with the cursor freshly returned from editing a dropdown (so that
+        RIGHT lands on the bot at row 0 of the unassigned list).
+        """
+        from barkem.bot.placement import PlacementResult
+
+        if not self.current_match or self._team_placer is None:
+            return PlacementResult(success=False, error="No active match.")
+
+        # Advance state: waiting_for_players → placing_teams
+        if self.state_machine.current_state is self.state_machine.waiting_for_players:
+            self.state_machine.players_joined()
+
+        team1_ids = [p["embark_id"] for p in self.current_match.team1.players]
+        team2_ids = [p["embark_id"] for p in self.current_match.team2.players]
+
+        result = self._team_placer.place_teams(
+            team1_ids=team1_ids,
+            team2_ids=team2_ids,
+            verify_after=True,
+        )
+        if result.ok:
+            self.current_match.status = MatchStatus.TEAMS_PLACED
+            if self.state_machine.current_state is self.state_machine.placing_teams:
+                self.state_machine.teams_placed()
+        return result
 
     def _start_cancel_timeout(self, seconds: int) -> None:
         if self._cancel_timeout_task:

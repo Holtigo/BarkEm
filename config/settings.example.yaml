@@ -35,12 +35,12 @@ input:
 
 # ── Menu navigation ────────────────────────────────────────────────────
 # The main menu wraps infinitely — the bot uses VISION (template
-# matching on "change_game_mode_selected.png") to find the button.
+# matching on "change_game_mode_selected.png") to find the button
+# by pressing DOWN until it appears.
 #
-# The game mode selection screen CAN be anchored: UP to the top,
-# then DOWN to Private Match.
+# The game mode selection screen's cursor always starts at the top,
+# so just DOWN×N to reach Private Match.
 sequences:
-  mode_anchor_up: 7          # UP presses to guarantee top of mode list
   mode_down_to_private: 7    # DOWN presses from top to Private Match
   private_to_create: ["x"]   # Private Match screen → Create Game
   lobby_start_match: ["x"]
@@ -70,7 +70,7 @@ grid:
   # The bot has fewer menu items than other players, so the button
   # is at a different position.  Count D-pad Downs from menu top.
   context_move_self: 2    # for the bot's own context menu
-  context_move_other: 3   # for other players' context menus
+  context_move_other: 4   # for other players' context menus
 
   # Dropdown anchoring — UP presses to guarantee index 0 inside an
   # open dropdown (game mode, map, variant, condition, game show).

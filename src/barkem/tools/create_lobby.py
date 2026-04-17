@@ -44,15 +44,18 @@ from barkem.vision.state_detector import GameStateDetector
 from barkem.vision.templates import TemplateMatcher
 
 
-def _build_creator(settings) -> tuple[LobbyCreator, GamepadController, ScreenCapture]:
+def _build_creator(
+    settings, debug: bool = False, slow: float = 1.0,
+) -> tuple[LobbyCreator, GamepadController, ScreenCapture]:
     cfg = settings.input
 
     pad = GamepadController(
         config=GamepadConfig(
-            button_delay=cfg.button_delay,
-            hold_duration=cfg.hold_duration,
+            button_delay=cfg.button_delay * slow,
+            hold_duration=cfg.hold_duration * slow,
             anchor_presses=cfg.anchor_presses,
-            anchor_settle=cfg.anchor_settle,
+            anchor_settle=cfg.anchor_settle * slow,
+            verbose=debug,
         )
     )
     pad.connect()
@@ -74,11 +77,10 @@ def _build_creator(settings) -> tuple[LobbyCreator, GamepadController, ScreenCap
         capture=cap,
         matcher=matcher,
         sequences=MenuSequences(
-            mode_anchor_up=seq.mode_anchor_up,
             mode_down_to_private=seq.mode_down_to_private,
             private_to_create=seq.private_to_create,
         ),
-        transition_wait=cfg.transition_wait,
+        transition_wait=cfg.transition_wait * slow,
     )
 
     grid = settings.grid
@@ -92,7 +94,7 @@ def _build_creator(settings) -> tuple[LobbyCreator, GamepadController, ScreenCap
             context_move_other=grid.context_move_other,
             dropdown_anchor_up=grid.dropdown_anchor_up,
         ),
-        step_wait=cfg.step_wait,
+        step_wait=cfg.step_wait * slow,
     )
 
     window = WindowManager(window_title=settings.game.window_title)
@@ -106,6 +108,8 @@ def _build_creator(settings) -> tuple[LobbyCreator, GamepadController, ScreenCap
         mode_indices=settings.mode_map.modes,
         map_indices=settings.mode_map.maps,
         window_manager=window,
+        focus_settle=0.5 * slow,
+        verbose=debug,
     )
     return creator, pad, cap
 
@@ -128,10 +132,16 @@ def main() -> None:
                         help="Pre-flight countdown (focus the game window)")
     parser.add_argument("--focus-only", action="store_true",
                         help="Just find + focus the game window, then exit")
+    parser.add_argument("--debug", action="store_true",
+                        help="Verbose output: print every button press and step")
+    parser.add_argument("--slow", type=float, default=1.0,
+                        help="Multiply all timing delays by this factor "
+                             "(e.g. --slow 3 triples every delay). "
+                             "Use with --debug to watch each step happen.")
     args = parser.parse_args()
 
     settings = get_settings()
-    creator, pad, cap = _build_creator(settings)
+    creator, pad, cap = _build_creator(settings, debug=args.debug, slow=args.slow)
 
     try:
         if args.focus_only:
