@@ -19,11 +19,11 @@ Usage:
 
 Pre-flight:
     - You are already in a private-match lobby.
-    - The bot is still unassigned (row 0 of the unassigned list).
+    - The bot is still unassigned (row 0 of the player list).
     - All expected players have joined and sit in the unassigned list.
     - Lobby OCR regions are calibrated in settings.yaml.
-    - Cursor must have just come back from editing a dropdown (so that
-      RIGHT lands it on the bot) — or use --snapshot / --dry-run first.
+    - Cursor state doesn't matter — the Manage Lobby (Y) flow re-anchors
+      every iteration.
 """
 
 import argparse

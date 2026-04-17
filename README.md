@@ -8,7 +8,7 @@ Stop manually creating lobbies. BarkEm handles lobby creation, team placement, m
 
 - **Automated lobby creation** — Creates private matches with configured mode, map, and variant
 - **Manual player join** — Returns lobby code via API, players join themselves
-- **Team placement** — Uses OCR to identify players, D-pad grid navigation to place them on correct teams
+- **Team placement** — OCR identifies each joined player (with background-colour classification to tell empty `---` slots from real ones); players are moved via the Manage Lobby overlay + *Move in Lobby* shortcut
 - **Captain ready system** — Match starts when both team captains type `-em ready` in game chat
 - **Pause/unpause support** — Captains can type `-em pause` and `-em unpause` during matches
 - **Match monitoring** — Sparse polling to detect match completion without resource waste
@@ -22,7 +22,7 @@ BarkEm uses a **single bot model** with **virtual controller emulation**:
 
 1. Bot creates private match lobby via D-pad menu navigation
 2. Returns lobby code via API → players join manually
-3. Bot moves itself to spectator, then places players on correct teams via grid navigation
+3. Bot places players onto their teams through the **Manage Lobby (Y)** overlay: OCR identifies each joined player, the bot opens the context menu on each one, picks *Move in Lobby*, then presses the dedicated Team 1 / Team 2 / Spectator shortcut. The bot finally sends itself to spectator via its own RS shortcut.
 4. Monitors chat for captain `-em ready` commands
 5. Both captains ready → countdown → match starts
 6. During match: monitors for `-em pause` / `-em unpause`
@@ -86,15 +86,16 @@ input:
 
 # Menu navigation
 sequences:
-  mode_anchor_up: 7
   mode_down_to_private: 7
 
 # Lobby grid (3-column layout)
 grid:
   team1_rows: 3
   team2_rows: 3
-  context_move_self: 1
-  context_move_other: 2
+  # DOWN presses from top of the context menu to "Move in Lobby".
+  # Menu order: block / report / promote / kick / move-in-lobby → 4.
+  context_move_other: 4
+  dropdown_anchor_up: 14
 ```
 
 See `config/settings.example.yaml` for the full configuration reference.
@@ -128,6 +129,24 @@ python -m barkem.tools.create_lobby --mode final_round --map monaco
 python -m barkem.tools.create_lobby --focus-only       # just verify window focus
 python -m barkem.tools.create_lobby --nav-only         # just menu nav, no OCR
 python -m barkem.tools.create_lobby --read-code-only   # OCR lobby code from current screen
+
+# Phase 3 — read lobby state + place players onto teams
+python -m barkem.tools.place_teams --snapshot          # OCR snapshot of current lobby
+python -m barkem.tools.place_teams --dry-run \
+    --team1 A#0001 B#0002 C#0003 \
+    --team2 D#0004 E#0005 F#0006                       # plan preview, no input
+python -m barkem.tools.place_teams \
+    --team1 A#0001 --team2 B#0002                      # partial rosters OK
+
+# Phase 2 + 3 combined — create lobby, wait for players, then place
+python -m barkem.tools.create_and_place \
+    --mode final_round --map monaco \
+    --team1 A#0001 --team2 B#0002
+python -m barkem.tools.create_and_place --skip-create \
+    --team1 A#0001 --team2 B#0002                      # reuse existing lobby
+
+# Live highlight (blue-glow cursor) debugger
+python -m barkem.tools.highlight_watch
 ```
 
 ## Usage
@@ -200,8 +219,16 @@ barkem/
 mode/map dropdown selection with OCR verification + retry, lobby code
 OCR.
 
-**Phase 3 next** — Team placement (OCR player names, place into team
-slots via D-pad).
+**Phase 3 complete** — Lobby state OCR (unassigned / spectators / team
+slots, with background-color classification to distinguish empty
+`---` rows from real players), and team placement via the Manage Lobby
+(Y) overlay + context-menu **Move in Lobby** flow. The bot itself uses
+the one-press RS self-shortcut to spectate at the end. Supports partial
+rosters for testing with a limited number of real accounts.
+
+**Phase 4 next** — Match lifecycle (captain `-em ready` / pause/unpause
+commands from chat, countdown + match start, sparse polling for match
+end, scoreboard OCR, webhook callbacks).
 
 ### Mode / map / variant relationships
 

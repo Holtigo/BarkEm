@@ -1,23 +1,33 @@
 """
-Phase 3 — Team placement orchestrator (shortcut-button flow).
+Phase 3 — Team placement orchestrator (Manage Lobby flow).
 
-With lobby shortcut buttons (LB/RB = Team 1/2, RS = Spectator, LS =
-Unassigned), placement is much simpler than the old context-menu flow:
+The lobby's one-press shortcut buttons (LB/RB/RS) only work on the
+local client — pressing them while another player is highlighted just
+moves the bot itself.  To move someone else we have to:
 
-  • From the dropdown-edited state, one RIGHT press lands the cursor
-    on the first unassigned slot — which is the bot, since the bot is
-    the only player who was unassigned when the lobby was first opened
-    and nobody has moved it since.
-  • DOWN once → now on the first *real* player (row 1 of unassigned).
-  • For each expected player (in the order they appear unassigned),
-    press the destination shortcut.  The moved player leaves the list,
-    every row below shifts up by one, and the cursor stays put — so the
-    next player is now on the same slot.  No re-navigation needed.
+  1. Press Y → open Manage Lobby overlay (starts on bot, row 0).
+  2. Press DOWN once to "activate" input (game swallows the first one;
+     cursor stays on bot).
+  3. Press DOWN N more times to reach the target player's row.
+     Manage Lobby lists everyone in one column: all unassigned (in join
+     order) first, then all assigned (team players) in order.
+  4. Press A → context menu opens on that player.
+  5. Press DOWN ×4 → land on "Move in Lobby".
+     (Context menu order: block, report, promote, kick, move in lobby.
+     Not swallowed; first DOWN works normally.  The offset is
+     configurable via LobbyGrid.context_move_other.)
+  6. Press A → exits Manage Lobby, returns to the normal lobby view
+     with the target player "armed" for the next destination button.
+  7. Press LB (team1) / RB (team2) / RS (spectator) → actual move.
 
-We still OCR-snapshot once up front to:
-  (a) confirm all expected players have actually joined, and
-  (b) know the order they sit in the unassigned list, so the per-slot
-      destination plan matches reality.
+That's one full Y-cycle per player.  After each cycle the Manage Lobby
+list has the moved player at a new position (under the team they were
+sent to), but the remaining unassigned players keep their relative
+order — bot stays row 0, every remaining unassigned is still contiguous
+starting at row 1.
+
+Bot → spectator at the end is a single RS press (self-shortcut; no
+navigation needed).
 """
 
 import time
@@ -114,41 +124,41 @@ class TeamPlacer:
                 error=f"Expected players not found unassigned: {missing}",
             )
 
-        # Walk the unassigned list top-down.  For each slot, either move
-        # it (to team1/team2) or skip it (leave it unassigned) by
-        # pressing DOWN.  The bot itself is always skipped with DOWN.
-        plan: list[tuple[str, str]] = []   # (name, "team1"|"team2"|"skip")
-        for name in snap.unassigned:
-            if self._fuzzy_in(name, self.bot_embark_id):
-                plan.append((name, "skip"))
-                continue
+        # Build the move list in join order.  We don't store absolute
+        # rows because every time a player is moved into a team, the
+        # remaining unassigned list compacts up by one — so the next
+        # player to move is always at row 1 (bot still at row 0).
+        #
+        # If the plan contains a "skip" (unlisted unassigned player that
+        # should stay unassigned), that player does NOT compact — it
+        # stays in the list.  We track how many such skipped players
+        # sit above the current target via ``skip_offset``.
+        # Row 0 is always the bot — nothing we read there needs to match
+        # ``bot_embark_id``.  Everyone else is a real player to classify.
+        moves: list[tuple[str, str]] = []   # (name, destination)
+        skipped_before: list[int] = []      # skip_offset per move
+        running_skips = 0
+        for name in snap.unassigned[1:]:
             dest = self._destination_for(name, team1_ids, team2_ids)
-            plan.append((name, dest))
+            if dest == "spectator":
+                # Unlisted player — leave them unassigned.  They stay
+                # in the list and push every later move down one row.
+                running_skips += 1
+                continue
+            moves.append((name, dest))
+            skipped_before.append(running_skips)
 
-        self._log("    plan (top-down):")
-        for name, dest in plan:
-            self._log(f"      {name!r} → {dest}")
+        self._log("    move plan (target row = 1 + skip_offset):")
+        for (name, dest), skip in zip(moves, skipped_before):
+            self._log(f"      {name!r} → {dest}  (skip_offset={skip})")
 
-        # Move cursor from "just edited a dropdown" → first unassigned.
-        # RIGHT lands on the first unassigned slot (which is row 0).
-        self._log("\n=== [placement] Positioning cursor (RIGHT) ===")
-        self.nav.ctrl.press("right")
-        time.sleep(self.step_wait)
-
-        # Top-down walk.  When we MOVE a player, the list shifts up and
-        # the cursor stays on the same screen slot → next player is now
-        # there, no navigation needed.  When we SKIP, the cursor has to
-        # step DOWN to reach the next row.
+        # Execute one Manage Lobby cycle per move.
         placed: list[str] = []
-        for name, dest in plan:
-            if dest == "skip":
-                self._log(f"    skip {name!r} (DOWN)")
-                self.nav.ctrl.press("down")
-                time.sleep(self.step_wait)
-            else:
-                self._log(f"    move {name!r} → {dest}")
-                self.nav.move_highlighted(dest)
-                placed.append(name)
+        for (name, dest), skip in zip(moves, skipped_before):
+            row = 1 + skip
+            self._log(f"\n--- moving {name!r} (row {row}) → {dest} ---")
+            self._manage_lobby_move(row, dest)
+            placed.append(name)
 
         mismatches: list[str] = []
         if verify_after:
@@ -158,11 +168,10 @@ class TeamPlacer:
                 self._log(f"    mismatches = {mismatches}")
 
         if spectate_bot:
-            self._log("\n=== [placement] Sending bot to spectator ===")
-            # Anchor → cursor lands on the first unassigned slot, which
-            # is the bot (it's the only unassigned player left).
-            self.nav.anchor()
-            time.sleep(self.step_wait)
+            # The bot's own shortcut works from any focus state — just
+            # press RS and the bot moves itself to spectator.  No need
+            # to open Manage Lobby.
+            self._log("\n=== [placement] Sending bot to spectator (RS) ===")
             self.nav.move_highlighted("spectator")
 
         return PlacementResult(
@@ -176,6 +185,45 @@ class TeamPlacer:
         return self._snapshot()
 
     # ── Internals ───────────────────────────────────────────────────────
+
+    def _manage_lobby_move(self, row: int, destination: str) -> None:
+        """
+        One full Y-cycle: open Manage Lobby, walk to *row*, pick "Move
+        in Lobby" from the context menu, then press the destination
+        shortcut.
+
+        *row* is 0-based into the Manage Lobby list, which starts with
+        the bot at row 0.  So for the first real player *row* = 1, etc.
+
+        After the LB/RB/RS press the game returns to the normal lobby
+        view and we're back to square one — next move needs another Y.
+        """
+        # 1. Open Manage Lobby (Y).  Starts on bot (row 0), input idle.
+        self.nav.ctrl.press("y")
+        time.sleep(self.step_wait)
+
+        # 2. Press DOWN once to activate input.  Cursor stays on row 0.
+        self.nav.ctrl.press("down")
+        time.sleep(self.step_wait)
+
+        # 3. Walk to the target row — subsequent DOWNs advance normally.
+        if row > 0:
+            self.nav.ctrl.press("down", row)
+            time.sleep(self.step_wait)
+
+        # 4. Open context menu.
+        self.nav.ctrl.confirm()
+        time.sleep(self.step_wait)
+
+        # 5. Walk to "Move in Lobby" and confirm.  Game returns to
+        #    normal lobby view with the player armed for the next btn.
+        self.nav.ctrl.press("down", self.nav.grid.context_move_other)
+        time.sleep(self.step_wait)
+        self.nav.ctrl.confirm()
+        time.sleep(self.step_wait)
+
+        # 6. Fire the destination shortcut — this completes the move.
+        self.nav.move_highlighted(destination)
 
     def _destination_for(
         self,
@@ -223,11 +271,25 @@ class TeamPlacer:
         return mismatches
 
     def _is_bot(self, embark_id: str) -> bool:
-        return self._norm(embark_id) == self._norm(self.bot_embark_id)
+        """
+        Match on the username portion only (before ``#``).  The
+        discriminator tag is easy to OCR wrong (#0746 → 2 etc.) and the
+        username alone is unique enough inside a single lobby.
+        """
+        return self._username(embark_id) == self._username(self.bot_embark_id)
+
+    @staticmethod
+    def _username(s: str) -> str:
+        # Strip the "#NNNN" tag if present, lowercase, remove anything
+        # that isn't a-z/0-9 — robust against OCR noise around '#'.
+        base = s.split("#", 1)[0].lower().strip()
+        return "".join(c for c in base if c.isalnum())
 
     @staticmethod
     def _norm(s: str) -> str:
-        return s.lower().strip()
+        # Lowercase + strip all non-alphanumerics so OCR noise like
+        # missing '#' or trailing digits doesn't break substring match.
+        return "".join(c for c in s.lower() if c.isalnum())
 
     def _fuzzy_in(self, seen: str, expected: str) -> bool:
         from rapidfuzz import fuzz
