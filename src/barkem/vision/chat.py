@@ -105,8 +105,14 @@ class ChatReader:
         """
         Parse raw OCR text into chat messages.
 
-        Expected format per line:
-        PlayerName#1234: message text
+        The Finals renders chat as ``Name message`` (no colon, no ``#tag`` —
+        the discriminator that appears on every Embark ID is stripped in
+        chat).  The first whitespace-separated token is the sender's
+        display name; everything after it is the message.
+
+        Some clients / OCR passes will occasionally include a colon
+        (``Name: message``) — we handle that too by treating the colon
+        as an optional separator.
 
         Args:
             raw_text: Raw OCR output from chat region.
@@ -122,20 +128,22 @@ class ChatReader:
             if not line:
                 continue
 
-            # Look for the colon separator
-            if ":" not in line:
-                continue
-
-            # Split on first colon
-            parts = line.split(":", 1)
+            # Split on the first whitespace run — "Name message" → ("Name", "message")
+            parts = line.split(None, 1)
             if len(parts) != 2:
                 continue
+            player_name, message_text = parts[0].strip(), parts[1].strip()
 
-            player_name = parts[0].strip()
-            message_text = parts[1].strip()
+            # Some chat variants keep the colon: "Name: message" → "Name:"
+            # Strip a trailing colon from the name token.
+            if player_name.endswith(":"):
+                player_name = player_name[:-1].strip()
 
-            # Basic validation - player name should contain #
-            if "#" not in player_name and len(player_name) < 3:
+            if not player_name or not message_text:
+                continue
+
+            # Guard against single-character OCR noise being mistaken for a name.
+            if len(player_name) < 2:
                 continue
 
             messages.append(
@@ -155,6 +163,7 @@ class ChatReader:
         command: str,
         allowed_players: list[str],
         fuzzy_threshold: int = 80,
+        only_new: bool = False,
     ) -> Optional[str]:
         """
         Check if any allowed player sent a specific command.
@@ -164,11 +173,19 @@ class ChatReader:
             command: Command to look for (e.g., "ready", "pause").
             allowed_players: List of Embark IDs who can trigger this command.
             fuzzy_threshold: Minimum fuzzy match score (0-100).
+            only_new: If True, only inspect messages not seen in the prior
+                poll.  Default False — The Finals' chat fades fast, so for
+                ready detection we want to accept *any currently visible*
+                matching message.  Set True for pause/unpause-style
+                edge-triggered commands where re-firing must not be
+                counted twice in a row.
 
         Returns:
             The matched player's Embark ID if found, None otherwise.
         """
-        messages = self.read_new_messages(frame)
+        messages = (
+            self.read_new_messages(frame) if only_new else self.read_chat(frame)
+        )
 
         for msg in messages:
             # Check if message matches command (with fuzzy matching for typos)
@@ -185,6 +202,10 @@ class ChatReader:
     ) -> bool:
         """
         Check if a message matches a command with -em prefix.
+
+        Tolerant to common OCR distortions: missing dash (``em ready``),
+        missing space (``-emready``), trailing punctuation (``ready!``),
+        and the discriminator absence that's normal in chat.
         """
         message = message.lower().strip()
         command = command.lower().strip()
@@ -194,11 +215,23 @@ class ChatReader:
         if message == expected:
             return True
 
+        # Substring match — catches OCR stray prefixes/suffixes and the
+        # discriminator-less forms (``em ready`` as well as ``-em ready``).
+        # Collapse whitespace + strip non-alphanumerics to compare cores.
+        def _core(s: str) -> str:
+            return "".join(c for c in s if c.isalnum())
+
+        if _core(expected) in _core(message):
+            return True
+        # Also accept "em ready" (dash dropped) at a word boundary
+        if ("em " + command) in message:
+            return True
+
         # Common abbreviations (with prefix)
         abbreviations = {
-            "ready": ["-em rdy", "-em r", "-em ready!"],
-            "pause": ["-em p", "-em paus"],
-            "unpause": ["-em unp", "-em resume", "-em unpasue"],
+            "ready": ["-em rdy", "-em r", "-em ready!", "em ready", "emready"],
+            "pause": ["-em p", "-em paus", "em pause"],
+            "unpause": ["-em unp", "-em resume", "-em unpasue", "em unpause"],
         }
 
         if command in abbreviations:

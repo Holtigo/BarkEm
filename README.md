@@ -145,6 +145,21 @@ python -m barkem.tools.create_and_place \
 python -m barkem.tools.create_and_place --skip-create \
     --team1 A#0001 --team2 B#0002                      # reuse existing lobby
 
+# Phase 4 — captain ready detection + match start
+python -m barkem.tools.ready_watch --captain1 A#0001   # live chat OCR + ready spotter
+python -m barkem.tools.ready_watch --raw               # dump full chat OCR each tick
+
+python -m barkem.tools.start_match --skip-ready        # press X immediately (no chat)
+python -m barkem.tools.start_match --captain1 A#0001 \
+    --min-ready 1                                      # solo-captain test: 1 ready → X
+python -m barkem.tools.start_match \
+    --captain1 A#0001 --captain2 B#0002 --min-ready 2  # production: both captains
+
+# Full Phase 2 → 3 → 4 pipeline (create, place, wait-for-ready, start)
+python -m barkem.tools.start_match --full \
+    --mode final_round --map monaco \
+    --team1 A#0001 --team2 B#0002 --min-ready 1
+
 # Live highlight (blue-glow cursor) debugger
 python -m barkem.tools.highlight_watch
 ```
@@ -226,9 +241,20 @@ slots, with background-color classification to distinguish empty
 the one-press RS self-shortcut to spectate at the end. Supports partial
 rosters for testing with a limited number of real accounts.
 
-**Phase 4 next** — Match lifecycle (captain `-em ready` / pause/unpause
-commands from chat, countdown + match start, sparse polling for match
-end, scoreboard OCR, webhook callbacks).
+**Phase 4 complete** — Chat-based captain ready detection (`-em ready`)
+and match start. The bot polls the chat region via OCR (~1s cadence;
+messages fade after ~8s in-game so anything faster than that catches
+them). When the configured number of captains have ready'd up, the
+bot presses **X** from the private-match lobby — the game's "Start
+Match" shortcut works from any focus state, so no button navigation
+is needed. `--min-ready 1` supports solo testing with a single real
+account; production runs use `--min-ready 2`. The 5-15s server-side
+wait between the X press and the actual match start is visible as
+the in-game loading screen, so no bot-authored chat announcement is
+sent.
+
+**Phase 5 next** — In-match lifecycle (pause/unpause commands, sparse
+polling for match end, scoreboard OCR, webhook callbacks).
 
 ### Mode / map / variant relationships
 

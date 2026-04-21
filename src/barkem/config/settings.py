@@ -124,6 +124,15 @@ class MonitoringSettings(BaseModel):
     late_threshold_seconds: int = 600
     chat_poll_interval: float = 1.0
 
+    # Phase 4 — ready watching
+    # How many captains must type "-em ready" before the bot presses X.
+    # 2 = production (both teams agree).  1 = testing with a single real
+    # account.  Can be overridden per-run via the CLI --min-ready flag.
+    min_ready_captains: int = 2
+    # Command chat fades after ~8s in-game.  Polling at 1s is safe; 2s
+    # still catches anything as long as the captain types once.
+    ready_timeout_seconds: int = 300
+
 
 class APISettings(BaseModel):
     host: str = "0.0.0.0"
