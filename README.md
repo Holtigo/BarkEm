@@ -160,6 +160,15 @@ python -m barkem.tools.start_match --full \
     --mode final_round --map monaco \
     --team1 A#0001 --team2 B#0002 --min-ready 1
 
+# Phase 5 — in-match monitor, pause handling, scoreboard OCR
+python -m barkem.tools.match_chat_watch --captain1 A#0001     # live in-match chat OCR
+python -m barkem.tools.scoreboard_read                        # OCR current scoreboard
+python -m barkem.tools.scoreboard_read --raw                  # dump every region's raw OCR
+python -m barkem.tools.match_watch --captain1 A#0001 \
+    --max-pause 120 --max-pauses-per-team 1                   # full monitor loop
+python -m barkem.tools.match_watch --read-scoreboard          # one-shot scoreboard OCR
+python -m barkem.tools.match_watch --skip-summary             # wait for SUMMARY, A-skip, OCR
+
 # Live highlight (blue-glow cursor) debugger
 python -m barkem.tools.highlight_watch
 ```
@@ -253,8 +262,80 @@ wait between the X press and the actual match start is visible as
 the in-game loading screen, so no bot-authored chat announcement is
 sent.
 
-**Phase 5 next** — In-match lifecycle (pause/unpause commands, sparse
-polling for match end, scoreboard OCR, webhook callbacks).
+**Phase 5 complete** — In-match lifecycle.  The bot polls chat during
+a live match by holding the Menu button to open the in-match chat
+window (different region from the lobby chat), OCRs, then closes
+with B.  On `-em pause` from a captain it runs a 3-sec chat countdown
+(typed via a virtual keyboard, since each message auto-closes chat
+and has to be re-opened), toggles pause with D-pad Left, waits for
+`-em unpause` / `-em continue` from the same captain *or* a
+configurable `max_duration_s` timeout, runs a 5-sec unpause
+countdown, and toggles pause off.  Per-team `max_pauses_per_team`
+and `cooldown_s` limits are enforced and API-overridable.
+
+Chat OCR uses a chat-specific preprocessing path (HSV-value threshold
+plus a 1-px stroke dilate) instead of the generic grayscale+Otsu
+pipeline — player names render in saturated teal and message bodies
+in near-white, and the generic pipeline was collapsing the teal into
+the background on bright scenes (fire, sky, snow). The V-channel
+threshold separates foreground from background regardless of what's
+behind the semi-transparent chat overlay. Bot-authored chat messages
+are typed in lowercase: pynput's `Controller.type()` on Windows + The
+Finals' chat widget drops shift-modified keys (the first real
+uppercase letter after a burst of lowercase input disappears
+outright), and lowercase sidesteps the shift path entirely.
+
+Match end is detected via the "SUMMARY" screen template — the bot
+presses A to skip it immediately, then hands the final scoreboard
+frame to `ScoreboardReader` for OCR. The current implementation
+captures only team scores; the full per-player statline is planned
+(see below).
+
+**Phase 6 next** — Full scoreboard capture. The in-game scoreboard
+exposes per-player stats beyond a single score:
+
+- Team money total (the currently-captured "score")
+- Per-player: display name, class indicator (L / M / H)
+- Per-player stats: eliminations, assists, deaths, revives, coins
+  (self-revive charges remaining), total damage dealt, total support
+  (healing + damage blocked + …), total objective (boxes inserted,
+  steals, platform time, …)
+
+Team names are not captured (private matches can't rename teams).
+Schema and region layout to be added in `ScoreboardReader` before
+the API endpoints are wired up.
+
+**Phase 7 next** — API endpoints, webhook result delivery, and the
+orchestrator that wires Phases 2-5 together behind a single
+`POST /api/v1/match/start` call.
+
+**Phase 8+ (future, not started)** — Once the core bot runs
+unattended and reliably, the direction is a small product around
+it:
+
+1. **Packaged distributable.** Windows `.exe` (PyInstaller)
+   bundling the signed ViGEmBus MSI alongside, so operators don't
+   have to install the driver separately. Linux installer script
+   with the `/dev/uinput` udev rule pre-wired. Bot name +
+   coordinator endpoint configurable at invocation time (CLI /
+   env / first-run wizard), not YAML-only.
+2. **Self-hostable coordinator service.** One coordinator
+   container + N bot VMs (each running The Finals inside a
+   GeForce NOW browser session). The coordinator fans match
+   requests out to idle bots, forwards results back to the
+   tournament system, and watches bot liveness — if a GeForce
+   NOW session drops or a bot goes unreachable, the operator
+   gets visibility.
+3. **Marketing site + opt-in global telemetry.** A public page
+   showing what BarkEm does, plus aggregate-only numbers (total
+   sessions managed, match-hours supervised) for operators who
+   opt in. No per-match detail, no PII.
+
+Phase 7 design decisions — API binding, configuration
+precedence, structured logging, heartbeat endpoint — are picked
+to avoid painting Phase 8+ into a corner. See the
+`the-finals-bot-report_v2_4.md` Appendix D for the full
+long-term plan.
 
 ### Mode / map / variant relationships
 

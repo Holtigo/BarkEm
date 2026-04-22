@@ -261,6 +261,21 @@ class GamepadController:
             self.backend.release_button(button)
             time.sleep(self.config.button_delay)
 
+    def press_hold(self, button: str, duration: float) -> None:
+        """
+        Hold a button down for ``duration`` seconds, then release.
+
+        Used for "hold Menu" to open in-match chat (The Finals treats a
+        tap on Menu as "open escape menu" but a hold as "open chat").
+        """
+        button = button.lower()
+        if self.config.verbose:
+            print(f"    [pad] hold {button.upper()} for {duration:.2f}s")
+        self.backend.press_button(button)
+        time.sleep(duration)
+        self.backend.release_button(button)
+        time.sleep(self.config.button_delay)
+
     # ── Mid-level ─────────────────────────────────────────────────────
 
     def anchor(self, presses: Optional[int] = None) -> None:

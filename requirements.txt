@@ -11,6 +11,9 @@ numpy>=1.24.0
 vgamepad>=0.1.0; sys_platform == "win32"
 evdev>=1.7.0; sys_platform == "linux"
 keyboard>=0.13.5
+# Virtual keyboard — typing chat messages during in-match pause
+# countdowns.  Windows uses pynput; Linux reuses the uinput stack.
+pynput>=1.7.6; sys_platform == "win32"
 
 # Windows
 pywin32>=306; sys_platform == "win32"
