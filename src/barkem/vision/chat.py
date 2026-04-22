@@ -4,8 +4,10 @@ Chat reading and command detection for in-game chat.
 
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 
+import cv2
 import numpy as np
 from rapidfuzz import fuzz
 
@@ -34,6 +36,8 @@ class ChatReader:
         self,
         chat_region: tuple[int, int, int, int],
         text_reader: Optional[TextReader] = None,
+        drop_top_line: bool = False,
+        debug_dump_dir: Optional[str] = None,
     ):
         """
         Initialize chat reader.
@@ -41,11 +45,42 @@ class ChatReader:
         Args:
             chat_region: (x1, y1, x2, y2) bounding box for chat area.
             text_reader: Optional TextReader instance.
+            drop_top_line: If True, discard the first OCR line of each
+                read.  Only needed when the chat_region is calibrated
+                wide enough to clip the top of the oldest visible
+                message — OCR then hallucinates nonsense from the
+                half-glyphs.  Prefer tightening chat_region so the top
+                line is fully visible and leave this off.
+            debug_dump_dir: If set, every ``read_chat`` call writes
+                three files into this directory — the raw cropped
+                chat ROI, the preprocessed (binarized/upscaled) image
+                actually handed to tesseract, and a sidecar ``.txt``
+                with the raw OCR output.  Use to diagnose why the same
+                visible chat reads differently poll-to-poll.
         """
         self.chat_region = chat_region
         self.text_reader = text_reader or TextReader()
+        self.drop_top_line = drop_top_line
         self.last_messages: list[ChatMessage] = []
         self._last_raw_text: str = ""
+        self._debug_dump_dir: Optional[Path] = (
+            Path(debug_dump_dir) if debug_dump_dir else None
+        )
+        if self._debug_dump_dir is not None:
+            self._debug_dump_dir.mkdir(parents=True, exist_ok=True)
+
+    def set_region(self, chat_region: tuple[int, int, int, int]) -> None:
+        """
+        Swap to a different on-screen chat region.
+
+        The lobby and in-match chat windows have different coordinates
+        — callers can reuse a single ChatReader by swapping the region
+        between phases.  Resets the "last seen" state so a fresh region
+        isn't diffed against a stale one.
+        """
+        self.chat_region = chat_region
+        self.last_messages = []
+        self._last_raw_text = ""
 
     def read_chat(self, frame: np.ndarray) -> list[ChatMessage]:
         """
@@ -60,13 +95,33 @@ class ChatReader:
         x1, y1, x2, y2 = self.chat_region
         chat_roi = frame[y1:y2, x1:x2]
 
-        # OCR the chat region (block of text mode)
-        raw_text = self.text_reader.read_text(chat_roi, psm=6)
+        # OCR the chat region (block of text mode) using chat-specific
+        # V-channel preprocessing — grayscale+Otsu eats the teal names.
+        raw_text = self.text_reader.read_chat_text(chat_roi, psm=6)
+
+        if self._debug_dump_dir is not None:
+            self._dump_debug(chat_roi, raw_text)
 
         # Parse into individual messages
         messages = self._parse_chat_text(raw_text)
 
         return messages
+
+    def _dump_debug(self, chat_roi: np.ndarray, raw_text: str) -> None:
+        """
+        Dump the chat ROI (raw), the preprocessed image actually sent
+        to tesseract, and the returned text for later inspection.
+        """
+        ts = f"{time.time():.3f}".replace(".", "_")
+        base = self._debug_dump_dir / f"chat_{ts}"
+        try:
+            cv2.imwrite(str(base.with_suffix(".raw.png")), chat_roi)
+            processed = self.text_reader.preprocess_chat(chat_roi)
+            cv2.imwrite(str(base.with_suffix(".pre.png")), processed)
+            base.with_suffix(".txt").write_text(raw_text, encoding="utf-8")
+        except Exception:
+            # Debug dump must never break the live loop.
+            pass
 
     def read_new_messages(self, frame: np.ndarray) -> list[ChatMessage]:
         """
@@ -123,10 +178,22 @@ class ChatReader:
         messages = []
         lines = raw_text.strip().split("\n")
 
+        # Top of the chat region usually clips a half-rendered older
+        # message — OCR hallucinates gibberish from the half-glyphs.
+        if self.drop_top_line and lines:
+            lines = lines[1:]
+
         for line in lines:
             line = line.strip()
             if not line:
                 continue
+
+            # The Finals optionally prefixes chat lines with a team/clan
+            # tag in brackets or with surrounding punctuation —
+            #   "[WAIDS] midnightmoron -em pause"
+            # The real player name is the token AFTER any leading
+            # bracketed tag.  Strip it before we split.
+            line = self._strip_leading_tag(line)
 
             # Split on the first whitespace run — "Name message" → ("Name", "message")
             parts = line.split(None, 1)
@@ -156,6 +223,61 @@ class ChatReader:
             )
 
         return messages
+
+    @staticmethod
+    def _strip_leading_tag(line: str) -> str:
+        """
+        Remove a leading ``[TAG]`` / ``(TAG)`` / ``<TAG>`` prefix plus
+        any spacing so the first remaining token is the player name.
+
+        The Finals shows a team/clan/platform tag before the name on
+        some chat lines.  OCR reads the whole tag as the first
+        whitespace-separated token and mis-attributes the real name
+        to the message body.  Handles a few common bracket styles and
+        common OCR mangles of brackets (``{``/``}``, ``|``, ``/``).
+        """
+        stripped = line.lstrip()
+        if not stripped:
+            return line
+        opener = stripped[0]
+        pairs = {"[": "]", "(": ")", "<": ">", "{": "}"}
+        if opener in pairs:
+            closer = pairs[opener]
+            end = stripped.find(closer)
+            if 0 < end < 40:  # sanity cap — a real tag is short
+                return stripped[end + 1:].lstrip()
+        return stripped
+
+    def find_command(
+        self,
+        frame: np.ndarray,
+        command: str,
+        allowed_players: list[str],
+        fuzzy_threshold: int = 80,
+    ) -> Optional[tuple[int, int, ChatMessage, str]]:
+        """
+        Like check_for_command, but returns positional context.
+
+        Returns (index, total_messages, matched_message, captain_id)
+        for the *last* matching command in the currently visible chat
+        block — or None if no match.
+
+        ``total_messages`` is how many messages are currently visible;
+        a caller can treat the match as "fresh" only if there are no
+        new messages after it (index == total_messages - 1) AND they
+        haven't seen the same (name, message, trailing_context) before.
+        """
+        messages = self.read_chat(frame)
+        total = len(messages)
+
+        for idx in range(total - 1, -1, -1):
+            msg = messages[idx]
+            if not self._command_matches(msg.message, command, fuzzy_threshold):
+                continue
+            for player in allowed_players:
+                if self._names_match(msg.player_name, player, fuzzy_threshold):
+                    return idx, total, msg, player
+        return None
 
     def check_for_command(
         self,
@@ -203,43 +325,78 @@ class ChatReader:
         """
         Check if a message matches a command with -em prefix.
 
-        Tolerant to common OCR distortions: missing dash (``em ready``),
-        missing space (``-emready``), trailing punctuation (``ready!``),
-        and the discriminator absence that's normal in chat.
+        STRICT — the ``-em <command>`` (or a tolerated OCR variant) must
+        be the *entire* message content.  Embedded commands inside a
+        longer sentence are rejected, so captains explaining the syntax
+        to teammates ("if you want to pause, type -em pause") won't
+        accidentally trigger a pause.
+
+        Still tolerant to normal OCR noise on the edges: a dropped
+        leading dash (``em pause``), a trailing ``!`` or ``.``, and a
+        single stray 1-character token at the front or back (common
+        artifact from avatar/icon pixels bleeding into the OCR).
         """
         message = message.lower().strip()
         command = command.lower().strip()
-        expected = f"-em {command}"
 
-        # Exact match
-        if message == expected:
+        # Tokenise on non-alphanumeric so punctuation doesn't split
+        # ``em`` and the command, and so ``-em`` and ``em.`` both
+        # reduce to the same token stream.
+        normalized = "".join(c if c.isalnum() else " " for c in message)
+        tokens = [t for t in normalized.split() if t]
+
+        # Strip a single stray 1-char token on either end — these are
+        # almost always OCR artifacts (icon fragments, stray ``l``/``i``
+        # from the UI chrome) rather than user-typed letters.
+        if len(tokens) >= 3 and len(tokens[0]) == 1:
+            tokens = tokens[1:]
+        if len(tokens) >= 3 and len(tokens[-1]) == 1:
+            tokens = tokens[:-1]
+
+        # Must be exactly two tokens: ``em`` and the command.
+        if len(tokens) != 2:
+            return False
+        tok1, tok2 = tokens
+        if tok1 != "em":
+            return False
+
+        # Exact command match
+        if tok2 == command:
             return True
 
-        # Substring match — catches OCR stray prefixes/suffixes and the
-        # discriminator-less forms (``em ready`` as well as ``-em ready``).
-        # Collapse whitespace + strip non-alphanumerics to compare cores.
-        def _core(s: str) -> str:
-            return "".join(c for c in s if c.isalnum())
-
-        if _core(expected) in _core(message):
-            return True
-        # Also accept "em ready" (dash dropped) at a word boundary
-        if ("em " + command) in message:
-            return True
-
-        # Common abbreviations (with prefix)
-        abbreviations = {
-            "ready": ["-em rdy", "-em r", "-em ready!", "em ready", "emready"],
-            "pause": ["-em p", "-em paus", "em pause"],
-            "unpause": ["-em unp", "-em resume", "-em unpasue", "em unpause"],
-        }
-
-        if command in abbreviations:
-            if message in abbreviations[command]:
+        # Distinctive-substring rules for the pause family (the edit
+        # distance between pause and unpause is too small for fuzzy
+        # matching to tell them apart reliably).
+        #
+        #   "unpause" / "unp*" / "unpaus" → always UNPAUSE
+        #   "continu*"                    → always CONTINUE
+        #   "resume*"                     → always UNPAUSE (alias)
+        #   anything starting with "p"
+        #     and NOT containing "unp"    → PAUSE
+        if command == "unpause":
+            if tok2.startswith("unp") or tok2.startswith("resume"):
                 return True
+            return False
+        if command == "continue":
+            if tok2.startswith("cont") or tok2.startswith("continu"):
+                return True
+            return False
+        if command == "pause":
+            if "unp" in tok2:
+                return False
+            # "p", "paus", "pause", "pasue" all start with "p"; also
+            # accept common one-off OCR artifacts.
+            if tok2.startswith("p") and len(tok2) <= 6:
+                return True
+            return False
 
-        # Fuzzy match against expected (with prefix)
-        score = fuzz.ratio(message, expected)
+        # Non-pause-family commands (e.g. "ready") — fuzzy match.
+        abbreviations = {
+            "ready": {"rdy", "r", "redy", "redi"},
+        }
+        if command in abbreviations and tok2 in abbreviations[command]:
+            return True
+        score = fuzz.ratio(tok2, command)
         return score >= threshold
 
     def _names_match(self, ocr_name: str, expected_name: str, threshold: int = 70) -> bool:

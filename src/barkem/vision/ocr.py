@@ -89,6 +89,78 @@ class TextReader:
 
         return binary
 
+    def preprocess_chat(
+        self,
+        image: np.ndarray,
+        v_threshold: int = 130,
+    ) -> np.ndarray:
+        """
+        Preprocess chat-region images using the HSV value channel.
+
+        The Finals renders chat with two foreground colors: a saturated
+        teal (~hsl(171,65%,45%), V≈190) for player names and near-white
+        (~hsl(180,100%,98%), V≈250) for message bodies.  The background
+        is a semi-transparent dark overlay that sits at V≈40–80 on top
+        of whatever game world is behind it.
+
+        ``cvtColor(..., COLOR_BGR2GRAY)`` collapses the teal and the
+        dark background into overlapping gray values, and Otsu's
+        single-cutoff threshold then splits between *teal names* and
+        *white messages* — turning names into background and dropping
+        the first letter of every message at the teal→white transition.
+
+        The fix: threshold on ``V = max(B, G, R)`` instead.  Both
+        foreground colors sit well above 130; the background sits
+        well below.  A fixed cutoff separates them cleanly regardless
+        of what's behind the chat window (fire, sky, snow — doesn't
+        matter, the HUD overlay keeps the background dim).
+        """
+        image = cv2.resize(
+            image,
+            None,
+            fx=self.upscale_factor,
+            fy=self.upscale_factor,
+            interpolation=cv2.INTER_CUBIC,
+        )
+
+        if len(image.shape) == 3:
+            v = image.max(axis=2)
+        else:
+            v = image
+
+        # Foreground (names + text) is bright → mask to 0, background
+        # to 255 so tesseract sees dark text on light.
+        _, binary = cv2.threshold(v, v_threshold, 255, cv2.THRESH_BINARY_INV)
+
+        # The teal name color renders with thinner strokes than the
+        # white message body.  Dilate 1px (on the inverted "ink"
+        # channel) so names don't get read as thinner lookalikes
+        # (S↔5, O↔0, etc.).  On the upscaled image one dilation pass
+        # thickens strokes by a fraction of a glyph-width, which is
+        # enough to stabilize character identity without merging
+        # adjacent letters.
+        inked = cv2.bitwise_not(binary)
+        kernel = np.ones((2, 2), np.uint8)
+        inked = cv2.dilate(inked, kernel, iterations=1)
+        binary = cv2.bitwise_not(inked)
+
+        binary = cv2.copyMakeBorder(
+            binary, 10, 10, 10, 10, cv2.BORDER_CONSTANT, value=255
+        )
+        return binary
+
+    def read_chat_text(
+        self,
+        image: np.ndarray,
+        psm: int = 6,
+        v_threshold: int = 130,
+    ) -> str:
+        """OCR a chat ROI using V-channel preprocessing."""
+        processed = self.preprocess_chat(image, v_threshold=v_threshold)
+        config = f"--oem 3 --psm {psm}"
+        text = pytesseract.image_to_string(processed, config=config)
+        return text.strip()
+
     def read_text(
             self,
             image: np.ndarray,

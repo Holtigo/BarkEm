@@ -124,6 +124,24 @@ monitoring:
   late_threshold_seconds: 600
   chat_poll_interval: 1.0
 
+  # Phase 5 — in-match monitoring
+  pause_poll_interval: 5.0
+  menu_hold_duration: 0.8
+  chat_open_settle: 0.4
+  summary_skip_delay: 1.0
+  summary_to_scoreboard_timeout: 10.0
+  pause_countdown_seconds: 3
+  unpause_countdown_seconds: 5
+  # Bump these if GeForce NOW eats message prefixes / pause presses.
+  keyboard_warmup: 0.6
+  gamepad_recovery: 0.4
+
+
+pause:
+  max_duration_s: 300.0
+  max_pauses_per_team: 2
+  cooldown_s: 30.0
+
 
 api:
   host: "0.0.0.0"
@@ -189,11 +207,15 @@ regions:
     spectator3_name: [572, 940, 1186, 983]
 
   chat:
-    chat_area: [100, 806, 509, 994]
+    chat_area: [100, 806, 509, 994]          # lobby chat
+    in_match_chat_area: [124, 392, 516, 584] # in-match chat
 
   scoreboard:
     team1_score: [216, 331, 303, 361]
     team2_score: [214, 548, 306, 580]
+
+    team1_name: [0, 0, 0, 0]
+    team2_name: [0, 0, 0, 0]
 
     team1_player1_score_name: [0, 0, 0, 0]
     team1_player1_score_value: [0, 0, 0, 0]

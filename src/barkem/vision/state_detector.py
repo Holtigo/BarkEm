@@ -23,6 +23,7 @@ class GameScreen(Enum):
     MATCH_LOADING = auto()         # Loading screen before match
     MATCH_IN_PROGRESS = auto()     # Active gameplay
     MATCH_PAUSED = auto()          # Match is paused
+    MATCH_SUMMARY = auto()         # "SUMMARY" screen between match and scoreboard
     MATCH_COMPLETE = auto()        # End-of-match banner
     SCOREBOARD = auto()            # Results screen
 
@@ -50,6 +51,9 @@ SCREEN_TEMPLATES: dict[GameScreen, list[str]] = {
     ],
     GameScreen.MATCH_IN_PROGRESS: [
         "match_in_progress_indicator",
+    ],
+    GameScreen.MATCH_SUMMARY: [
+        "match_summary",
     ],
     GameScreen.MATCH_COMPLETE: [
         "match_complete_banner",

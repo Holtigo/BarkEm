@@ -117,6 +117,21 @@ class TimingSettings(BaseModel):
     pause_cooldown: float = 30.0
 
 
+class PauseSettings(BaseModel):
+    """
+    Default limits for in-match pauses.  Per-match overrides can come
+    from the API request's ``config`` block.
+    """
+
+    # How long a single pause is allowed to last before auto-unpause.
+    max_duration_s: float = 300.0
+    # How many pauses each team may request across the full match.
+    max_pauses_per_team: int = 2
+    # How long between a team's pauses (prevents spam).  Matches the
+    # old TimingSettings.pause_cooldown but scoped here.
+    cooldown_s: float = 30.0
+
+
 class MonitoringSettings(BaseModel):
     initial_poll_interval: int = 60
     mid_poll_interval: int = 30
@@ -132,6 +147,35 @@ class MonitoringSettings(BaseModel):
     # Command chat fades after ~8s in-game.  Polling at 1s is safe; 2s
     # still catches anything as long as the captain types once.
     ready_timeout_seconds: int = 300
+
+    # Phase 5 — in-match monitoring
+    # In-match chat isn't persistent on-screen — the bot has to hold
+    # the Menu button to open it, OCR, then close with B.  We do this
+    # at a slower cadence than lobby chat.
+    pause_poll_interval: float = 5.0
+    # How long to hold the Menu button to open chat (tap = escape menu).
+    menu_hold_duration: float = 0.8
+    # Settle time after holding Menu before OCR.
+    chat_open_settle: float = 0.4
+    # Seconds between SUMMARY detection and pressing A to skip it.
+    # The screen auto-advances after ~20s regardless, so a short wait
+    # lets any transitions finish rendering before we send A.
+    summary_skip_delay: float = 1.0
+    # How long to wait for the scoreboard after SUMMARY was skipped
+    # before giving up and OCR'ing whatever is on screen.
+    summary_to_scoreboard_timeout: float = 10.0
+    # Unpause countdown (also used as pause-announce countdown).
+    pause_countdown_seconds: int = 3
+    unpause_countdown_seconds: int = 5
+    # Wait between priming keystroke and real chat message.  On GeForce
+    # NOW the chat widget needs time to take keyboard focus after the
+    # gamepad→keyboard handoff; keystrokes sent into that gap are
+    # dropped.  Bump this if you still see mangled message prefixes.
+    keyboard_warmup: float = 0.6
+    # Wait between finishing a chat message and the next gamepad press
+    # (D-pad Left for pause toggle).  Cloud streaming has to swap input
+    # modes back to gamepad — a button press into that gap is eaten.
+    gamepad_recovery: float = 0.4
 
 
 class APISettings(BaseModel):
@@ -161,6 +205,7 @@ class Settings(BaseSettings):
     grid: GridSettings = Field(default_factory=GridSettings)
     mode_map: ModeMapIndexSettings = Field(default_factory=ModeMapIndexSettings)
     timing: TimingSettings = Field(default_factory=TimingSettings)
+    pause: PauseSettings = Field(default_factory=PauseSettings)
     monitoring: MonitoringSettings = Field(default_factory=MonitoringSettings)
     api: APISettings = Field(default_factory=APISettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)

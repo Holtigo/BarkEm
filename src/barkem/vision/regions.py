@@ -158,9 +158,17 @@ class LobbyRegions:
 
 @dataclass
 class ChatRegions:
-    """Region for in-game chat reading."""
+    """
+    Regions for in-game chat reading.
+
+    The chat window has different on-screen coordinates in the lobby
+    vs during a live match (smaller + centred in-match), so both are
+    stored separately.  ``chat_area`` is the lobby chat; the in-match
+    version lives at ``in_match_chat_area``.
+    """
 
     chat_area: Region = field(default_factory=_ZERO)
+    in_match_chat_area: Region = field(default_factory=_ZERO)
 
 
 # ── Scoreboard ────────────────────────────────────────────────────────────
@@ -171,6 +179,10 @@ class ScoreboardRegions:
 
     team1_score: Region = field(default_factory=_ZERO)
     team2_score: Region = field(default_factory=_ZERO)
+
+    # Team display names at the top of each team block
+    team1_name: Region = field(default_factory=_ZERO)
+    team2_name: Region = field(default_factory=_ZERO)
 
     team1_player1_score_name: Region = field(default_factory=_ZERO)
     team1_player1_score_value: Region = field(default_factory=_ZERO)
@@ -185,6 +197,15 @@ class ScoreboardRegions:
     team2_player2_score_value: Region = field(default_factory=_ZERO)
     team2_player3_score_name: Region = field(default_factory=_ZERO)
     team2_player3_score_value: Region = field(default_factory=_ZERO)
+
+    def team_player_slots(self, team: int) -> list[tuple[str, Region, Region]]:
+        """Return (label, name_region, value_region) per player slot for a team."""
+        out = []
+        for i in range(1, 4):
+            name = getattr(self, f"team{team}_player{i}_score_name")
+            value = getattr(self, f"team{team}_player{i}_score_value")
+            out.append((f"team{team}_player{i}", name, value))
+        return out
 
 
 # ── Match ─────────────────────────────────────────────────────────────────
