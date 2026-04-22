@@ -68,7 +68,7 @@ def draw_all_regions(
     """Draw ALL configured OCR regions on a frame for visual verification."""
     annotated = frame.copy()
 
-    for group_name in ["context_menu", "lobby", "chat", "scoreboard", "match"]:
+    for group_name in ["context_menu", "lobby", "chat", "match"]:
         group = getattr(regions, group_name, None)
         if group is None:
             continue
@@ -81,7 +81,30 @@ def draw_all_regions(
                     continue
                 annotated = draw_region(annotated, val, label=f"{group_name}.{field_name}")
 
+    annotated = draw_scoreboard_regions(annotated, regions.scoreboard, skip_zero=skip_zero)
     return annotated
+
+
+def draw_scoreboard_regions(frame: np.ndarray, sb, skip_zero: bool = True) -> np.ndarray:
+    """Draw scoreboard totals + every row×column cell."""
+    from barkem.vision.regions import SCOREBOARD_STAT_COLUMNS
+
+    for name in ("team1_score", "team2_score"):
+        r = getattr(sb, name)
+        if skip_zero and r.is_zero:
+            continue
+        frame = draw_region(frame, r, label=f"scoreboard.{name}")
+
+    columns = ("class", "name", *SCOREBOARD_STAT_COLUMNS)
+    for team_id in (1, 2):
+        for row_idx in range(3):
+            for col in columns:
+                cell = sb.cell(team_id, row_idx, col)
+                if skip_zero and cell.is_zero:
+                    continue
+                label = f"sb.t{team_id}r{row_idx + 1}.{col}"
+                frame = draw_region(frame, cell, label=label)
+    return frame
 
 
 def save_debug_screenshot(

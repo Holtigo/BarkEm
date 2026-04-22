@@ -173,39 +173,98 @@ class ChatRegions:
 
 # ── Scoreboard ────────────────────────────────────────────────────────────
 
+# Per-player stat columns rendered in the final scoreboard (left→right,
+# after the class glyph + name).  All six player rows share the same
+# x-coordinates, so calibration only needs one [x1, x2] span per column.
+#
+# Note: "coins" (self-revive charges) is only visible during the
+# live match — the post-match spectator scoreboard omits it, so it's
+# not in this list.
+SCOREBOARD_STAT_COLUMNS: tuple[str, ...] = (
+    "elims",
+    "assists",
+    "deaths",
+    "revives",
+    "damage",
+    "support",
+    "objective",
+)
+
+
+@dataclass
+class ColumnX:
+    """Horizontal span [x1, x2] shared across all 6 player rows."""
+
+    x1: int = 0
+    x2: int = 0
+
+    @property
+    def is_zero(self) -> bool:
+        return self.x1 == 0 and self.x2 == 0
+
+
+@dataclass
+class RowY:
+    """Vertical span [y1, y2] for one player row."""
+
+    y1: int = 0
+    y2: int = 0
+
+    @property
+    def is_zero(self) -> bool:
+        return self.y1 == 0 and self.y2 == 0
+
+
 @dataclass
 class ScoreboardRegions:
-    """OCR regions for end-of-match scoreboard."""
+    """
+    OCR regions for the end-of-match scoreboard.
 
+    Layout is row-anchored + column-offset: calibration captures a
+    y-span for each of the 6 player rows (3 per team) and an x-span
+    for each column (class, name, elims, …).  The reader crosses them
+    to produce per-cell bounding boxes, so there are ~16 small inputs
+    instead of 60+ flat `(player, stat)` regions.
+    """
+
+    # Team money totals (already calibrated before Phase 6).
     team1_score: Region = field(default_factory=_ZERO)
     team2_score: Region = field(default_factory=_ZERO)
 
-    # Team display names at the top of each team block
-    team1_name: Region = field(default_factory=_ZERO)
-    team2_name: Region = field(default_factory=_ZERO)
+    # Per-row y-spans — team1 on top, team2 below.  Always 3 rows each.
+    team1_rows: list[RowY] = field(default_factory=lambda: [RowY(), RowY(), RowY()])
+    team2_rows: list[RowY] = field(default_factory=lambda: [RowY(), RowY(), RowY()])
 
-    team1_player1_score_name: Region = field(default_factory=_ZERO)
-    team1_player1_score_value: Region = field(default_factory=_ZERO)
-    team1_player2_score_name: Region = field(default_factory=_ZERO)
-    team1_player2_score_value: Region = field(default_factory=_ZERO)
-    team1_player3_score_name: Region = field(default_factory=_ZERO)
-    team1_player3_score_value: Region = field(default_factory=_ZERO)
+    # Per-column x-spans.  ``class_`` is the L/M/H glyph column,
+    # ``name`` is the Embark ID column, the rest are the stat columns
+    # in SCOREBOARD_STAT_COLUMNS order.
+    col_class: ColumnX = field(default_factory=ColumnX)
+    col_name: ColumnX = field(default_factory=ColumnX)
+    col_elims: ColumnX = field(default_factory=ColumnX)
+    col_assists: ColumnX = field(default_factory=ColumnX)
+    col_deaths: ColumnX = field(default_factory=ColumnX)
+    col_revives: ColumnX = field(default_factory=ColumnX)
+    col_damage: ColumnX = field(default_factory=ColumnX)
+    col_support: ColumnX = field(default_factory=ColumnX)
+    col_objective: ColumnX = field(default_factory=ColumnX)
 
-    team2_player1_score_name: Region = field(default_factory=_ZERO)
-    team2_player1_score_value: Region = field(default_factory=_ZERO)
-    team2_player2_score_name: Region = field(default_factory=_ZERO)
-    team2_player2_score_value: Region = field(default_factory=_ZERO)
-    team2_player3_score_name: Region = field(default_factory=_ZERO)
-    team2_player3_score_value: Region = field(default_factory=_ZERO)
+    def row(self, team: int, idx: int) -> RowY:
+        """Return the RowY for team (1 or 2), 0-based row index (0..2)."""
+        rows = self.team1_rows if team == 1 else self.team2_rows
+        return rows[idx]
 
-    def team_player_slots(self, team: int) -> list[tuple[str, Region, Region]]:
-        """Return (label, name_region, value_region) per player slot for a team."""
-        out = []
-        for i in range(1, 4):
-            name = getattr(self, f"team{team}_player{i}_score_name")
-            value = getattr(self, f"team{team}_player{i}_score_value")
-            out.append((f"team{team}_player{i}", name, value))
-        return out
+    def column(self, name: str) -> ColumnX:
+        """Return the ColumnX for a column name ('class', 'name', 'elims', …)."""
+        attr = "col_class" if name == "class" else f"col_{name}"
+        return getattr(self, attr)
+
+    def cell(self, team: int, row_idx: int, col_name: str) -> Region:
+        """Cross a row and column into a single cell Region."""
+        r = self.row(team, row_idx)
+        c = self.column(col_name)
+        if r.is_zero or c.is_zero:
+            return Region(0, 0, 0, 0)
+        return Region(c.x1, r.y1, c.x2, r.y2)
 
 
 # ── Match ─────────────────────────────────────────────────────────────────
@@ -235,8 +294,11 @@ def load_regions_from_dict(data: dict) -> ScreenRegions:
     """
     Load ScreenRegions from a nested dict (e.g. from YAML config).
 
-    Lists of length 4 → Region(x1, y1, x2, y2).
-    Other values are silently ignored.
+    Standard groups (context_menu, dropdowns, lobby, chat, match):
+      Lists of length 4 → Region(x1, y1, x2, y2).
+
+    Scoreboard has a richer shape — see :func:`_load_scoreboard`.
+    Unknown keys and malformed values are silently ignored.
     """
     regions = ScreenRegions()
     if not data:
@@ -247,7 +309,6 @@ def load_regions_from_dict(data: dict) -> ScreenRegions:
         "dropdowns": regions.dropdowns,
         "lobby": regions.lobby,
         "chat": regions.chat,
-        "scoreboard": regions.scoreboard,
         "match": regions.match,
     }
 
@@ -262,4 +323,31 @@ def load_regions_from_dict(data: dict) -> ScreenRegions:
             if isinstance(val, list) and len(val) == 4:
                 setattr(group_obj, key, Region(val[0], val[1], val[2], val[3]))
 
+    _load_scoreboard(regions.scoreboard, data.get("scoreboard", {}) or {})
     return regions
+
+
+def _load_scoreboard(sb: ScoreboardRegions, data: dict) -> None:
+    """Populate ScoreboardRegions from the YAML ``scoreboard:`` block."""
+    for team_field in ("team1_score", "team2_score"):
+        val = data.get(team_field)
+        if isinstance(val, list) and len(val) == 4:
+            setattr(sb, team_field, Region(val[0], val[1], val[2], val[3]))
+
+    for team_idx, key in ((1, "team1_rows"), (2, "team2_rows")):
+        raw = data.get(key)
+        if not isinstance(raw, list):
+            continue
+        rows = [RowY(r[0], r[1]) for r in raw if isinstance(r, list) and len(r) == 2]
+        while len(rows) < 3:
+            rows.append(RowY())
+        target = sb.team1_rows if team_idx == 1 else sb.team2_rows
+        target[:] = rows[:3]
+
+    cols = data.get("columns") or {}
+    for col_name in ("class", "name", *SCOREBOARD_STAT_COLUMNS):
+        val = cols.get(col_name)
+        if not (isinstance(val, list) and len(val) == 2):
+            continue
+        attr = "col_class" if col_name == "class" else f"col_{col_name}"
+        setattr(sb, attr, ColumnX(val[0], val[1]))

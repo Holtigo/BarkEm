@@ -190,7 +190,7 @@ class ChatReader:
 
             # The Finals optionally prefixes chat lines with a team/clan
             # tag in brackets or with surrounding punctuation —
-            #   "[WAIDS] midnightmoron -em pause"
+            #   "[CLAN] playername -em pause"
             # The real player name is the token AFTER any leading
             # bracketed tag.  Strip it before we split.
             line = self._strip_leading_tag(line)

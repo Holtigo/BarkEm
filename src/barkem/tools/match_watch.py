@@ -316,9 +316,13 @@ def _print_scoreboard(result) -> None:
         print(f"  NOTE: {result.error}")
     for team in (result.team1, result.team2):
         flag = " ← winner" if result.winner_team_id == team.team_id else ""
-        print(f"  Team {team.team_id}  name={team.team_name!r}  total={team.total_score}{flag}")
+        print(f"  Team {team.team_id}  total={team.total_score}{flag}")
         for p in team.players:
-            print(f"    {p.slot:20}  {p.ocr_name!r:30}  {p.score}")
+            print(
+                f"    {p.slot:18}  [{p.class_ or '?'}]  {p.ocr_name!r:28}  "
+                f"E/A/D={p.elims}/{p.assists}/{p.deaths}  rev={p.revives}  "
+                f"dmg={p.damage} sup={p.support} obj={p.objective}"
+            )
 
 
 if __name__ == "__main__":

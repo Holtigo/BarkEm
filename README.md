@@ -160,14 +160,18 @@ python -m barkem.tools.start_match --full \
     --mode final_round --map monaco \
     --team1 A#0001 --team2 B#0002 --min-ready 1
 
-# Phase 5 — in-match monitor, pause handling, scoreboard OCR
+# Phase 5 — in-match monitor, pause handling
 python -m barkem.tools.match_chat_watch --captain1 A#0001     # live in-match chat OCR
-python -m barkem.tools.scoreboard_read                        # OCR current scoreboard
-python -m barkem.tools.scoreboard_read --raw                  # dump every region's raw OCR
 python -m barkem.tools.match_watch --captain1 A#0001 \
     --max-pause 120 --max-pauses-per-team 1                   # full monitor loop
 python -m barkem.tools.match_watch --read-scoreboard          # one-shot scoreboard OCR
 python -m barkem.tools.match_watch --skip-summary             # wait for SUMMARY, A-skip, OCR
+
+# Phase 6 — full scoreboard capture (per-player statline)
+python -m barkem.tools.calibrate --scoreboard                 # guided row/column wizard
+python -m barkem.tools.scoreboard_read                        # OCR current scoreboard
+python -m barkem.tools.scoreboard_read --raw                  # dump every cell's raw OCR
+python -m barkem.tools.scoreboard_read --draw                 # draw every cell on a screenshot
 
 # Live highlight (blue-glow cursor) debugger
 python -m barkem.tools.highlight_watch
@@ -287,23 +291,52 @@ outright), and lowercase sidesteps the shift path entirely.
 
 Match end is detected via the "SUMMARY" screen template — the bot
 presses A to skip it immediately, then hands the final scoreboard
-frame to `ScoreboardReader` for OCR. The current implementation
-captures only team scores; the full per-player statline is planned
-(see below).
+frame to `ScoreboardReader` for OCR.
 
-**Phase 6 next** — Full scoreboard capture. The in-game scoreboard
-exposes per-player stats beyond a single score:
+**Phase 6 complete** — Full scoreboard capture (Final Round /
+Head2Head: 2 teams × 3 players).  `ScoreboardReader` now returns the
+complete per-player statline, not just a team total:
 
-- Team money total (the currently-captured "score")
-- Per-player: display name, class indicator (L / M / H)
-- Per-player stats: eliminations, assists, deaths, revives, coins
-  (self-revive charges remaining), total damage dealt, total support
-  (healing + damage blocked + …), total objective (boxes inserted,
-  steals, platform time, …)
+- Team money total (per team)
+- Per player: class indicator (L / M / H), Embark ID, eliminations,
+  assists, deaths, revives, total damage dealt, total support
+  (healing + damage blocked + cover), total objective (box inserts +
+  steals + platform time + …)
 
-Team names are not captured (private matches can't rename teams).
-Schema and region layout to be added in `ScoreboardReader` before
-the API endpoints are wired up.
+Team names are intentionally not captured — private matches can't
+rename teams, so the label is always the default.  **Coins**
+(self-revive charges remaining) are only shown in the live in-match
+HUD, not on the post-match spectator scoreboard, so they're excluded
+from the capture.
+
+Region layout is a **row × column grid** rather than a flat list of
+(player, stat) boxes.  All 6 player rows share the same x-coordinates
+for every column, so calibration only needs 3 y-spans per team + one
+x-span per column (class, name, and the 7 stat columns) — 15 inputs
+instead of 50+ flat regions.  The reader crosses a row y-span with a
+column x-span to get each cell bounding box.
+
+OCR is column-aware: the L/M/H glyph uses a single-character whitelist
+(`tessedit_char_whitelist=LMH`, psm 10), integer stats whitelist digits
+plus thousand separators which are stripped before parsing, and names
+use the player-name whitelist (the discriminator is included in the
+OCR'd name; fuzzy-matching against the known roster is the caller's
+job).
+
+**Preprocessing — V-channel for the whole scoreboard.** Scoreboard
+cells render white text on the team's coloured tile (orange, pink,
+blue, teal, …). Grayscale+Otsu picks a single global cutoff and on
+pale team colours the white glyphs and background end up on the same
+side of the threshold. The chat-OCR V-channel path (`V = max(B, G,
+R)`) avoids this entirely: pure white sits at V≈255 regardless of
+hue, while team tiles sit at V≈150-200, so a fixed cutoff separates
+them cleanly. Every scoreboard read — team totals, class glyph,
+name, and the 8 stat columns — is routed through `preprocess_chat`.
+
+A guided calibration wizard lives at `python -m barkem.tools.calibrate
+--scoreboard`: it captures a screenshot, prompts through all 16 spans
+via two right-clicks each, then prints a ready-to-paste YAML block for
+`regions.scoreboard`.
 
 **Phase 7 next** — API endpoints, webhook result delivery, and the
 orchestrator that wires Phases 2-5 together behind a single

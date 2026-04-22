@@ -210,26 +210,33 @@ regions:
     chat_area: [100, 806, 509, 994]          # lobby chat
     in_match_chat_area: [124, 392, 516, 584] # in-match chat
 
+  # ── Scoreboard (Phase 6 — row × column grid) ──
+  # Per-player rows share x-coordinates across both teams, so instead
+  # of 60 flat (player, stat) regions we capture:
+  #   • team totals      — two full bboxes
+  #   • team{1,2}_rows   — three [y1, y2] spans per team (player rows)
+  #   • columns          — one [x1, x2] per column, shared across rows
+  # The reader crosses a row × column to produce each cell region.
+  #
+  # Calibrate with:
+  #   python -m barkem.tools.calibrate --scoreboard
   scoreboard:
     team1_score: [216, 331, 303, 361]
     team2_score: [214, 548, 306, 580]
 
-    team1_name: [0, 0, 0, 0]
-    team2_name: [0, 0, 0, 0]
+    team1_rows: [[236, 273], [281, 316], [323, 362]]
+    team2_rows: [[454, 497], [504, 547], [554, 597]]
 
-    team1_player1_score_name: [0, 0, 0, 0]
-    team1_player1_score_value: [0, 0, 0, 0]
-    team1_player2_score_name: [0, 0, 0, 0]
-    team1_player2_score_value: [0, 0, 0, 0]
-    team1_player3_score_name: [0, 0, 0, 0]
-    team1_player3_score_value: [0, 0, 0, 0]
-
-    team2_player1_score_name: [0, 0, 0, 0]
-    team2_player1_score_value: [0, 0, 0, 0]
-    team2_player2_score_name: [0, 0, 0, 0]
-    team2_player2_score_value: [0, 0, 0, 0]
-    team2_player3_score_name: [0, 0, 0, 0]
-    team2_player3_score_value: [0, 0, 0, 0]
+    columns:
+      class:     [347, 389]   # L / M / H glyph
+      name:      [387, 845]   # Embark ID (with discriminator for now)
+      elims:     [851, 940]
+      assists:   [941, 1040]
+      deaths:    [1038, 1134]
+      revives:   [1124, 1206]
+      damage:    [1238, 1405]
+      support:   [1409, 1601]
+      objective: [1607, 1790]
 
   match:
     pause_indicator: [0, 0, 0, 0]

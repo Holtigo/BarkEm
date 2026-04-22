@@ -166,6 +166,8 @@ class TextReader:
             image: np.ndarray,
             whitelist: Optional[str] = None,
             psm: int = 7,
+            use_v_channel: bool = False,
+            v_threshold: int = 130,
     ) -> str:
         """
         Extract text from image.
@@ -176,11 +178,23 @@ class TextReader:
             psm: Page segmentation mode.
                  7 = single line (for names, codes).
                  6 = block of text (for chat).
+            use_v_channel: If True, preprocess via the V-channel path
+                 (``preprocess_chat``) instead of grayscale+Otsu.  Use
+                 when the ROI has white text on a coloured background —
+                 the scoreboard stat cells sit on team-colour tiles
+                 (orange / pink / blue / …), and Otsu can pick a bad
+                 cutoff on the pale-colour teams.  The V-channel path
+                 puts white at V≈255 regardless of hue.
+            v_threshold: Cutoff for the V-channel path (ignored when
+                 ``use_v_channel`` is False).
 
         Returns:
             Extracted text string.
         """
-        processed = self.preprocess(image)
+        if use_v_channel:
+            processed = self.preprocess_chat(image, v_threshold=v_threshold)
+        else:
+            processed = self.preprocess(image)
 
         config = f"--oem 3 --psm {psm}"
         if whitelist:
@@ -194,6 +208,8 @@ class TextReader:
             image: np.ndarray,
             whitelist: Optional[str] = None,
             psm: int = 7,
+            use_v_channel: bool = False,
+            v_threshold: int = 130,
     ) -> OCRResult:
         """
         Extract text with confidence score.
@@ -202,11 +218,16 @@ class TextReader:
             image: BGR or grayscale image.
             whitelist: Optional character whitelist.
             psm: Page segmentation mode.
+            use_v_channel: See :meth:`read_text`.
+            v_threshold: See :meth:`read_text`.
 
         Returns:
             OCRResult with text and confidence.
         """
-        processed = self.preprocess(image)
+        if use_v_channel:
+            processed = self.preprocess_chat(image, v_threshold=v_threshold)
+        else:
+            processed = self.preprocess(image)
 
         config = f"--oem 3 --psm {psm}"
         if whitelist:
@@ -237,10 +258,27 @@ class TextReader:
             region=(0, 0, image.shape[1], image.shape[0]),
         )
 
+    _PLAYER_NAME_WHITELIST = (
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789#_-"
+    )
+
     def read_player_name(self, image: np.ndarray) -> str:
         """Read a player name (Embark ID format: PlayerName#1234)."""
-        whitelist = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789#_-"
-        return self.read_text(image, whitelist=whitelist)
+        return self.read_text(image, whitelist=self._PLAYER_NAME_WHITELIST)
+
+    def read_player_name_on_tile(self, image: np.ndarray) -> str:
+        """
+        Read a player name on a coloured team tile (scoreboard).
+
+        Same whitelist as :meth:`read_player_name`, but routed through
+        the V-channel path so the team-tile background colour doesn't
+        throw off Otsu on pale hues.
+        """
+        return self.read_text(
+            image,
+            whitelist=self._PLAYER_NAME_WHITELIST,
+            use_v_channel=True,
+        )
 
     def read_lobby_code(self, image: np.ndarray) -> str:
         """Read the 4-character alphanumeric lobby code."""
@@ -251,13 +289,60 @@ class TextReader:
         return text[:4] if len(text) >= 4 else text
 
     def read_score(self, image: np.ndarray) -> Optional[int]:
-        """Read a numeric score."""
-        text = self.read_text(image, whitelist="0123456789")
+        """
+        Read a numeric team-total score.
+
+        Team totals sit on the team's coloured tile (orange / pink /
+        blue / …) with white digits; the V-channel path handles these
+        robustly regardless of hue.
+        """
+        text = self.read_text(
+            image, whitelist="0123456789", use_v_channel=True,
+        )
         text = text.replace(",", "").replace(" ", "")
         try:
             return int(text)
         except ValueError:
             return None
+
+    def read_int(self, image: np.ndarray) -> Optional[int]:
+        """
+        Read a non-negative integer, tolerating thousand separators.
+
+        Damage / support / objective columns can render as ``12,345`` or
+        ``12.345``; small-count stats (kills, assists, …) never do.
+        Whitelist digits + both common separators, then strip them
+        before parsing.
+
+        Scoreboard stat cells are white text on a coloured team-tile
+        background, so we run through the V-channel preprocessing path
+        (``preprocess_chat``).  Otsu can pick a bad cutoff on pale team
+        colours; thresholding on V puts white at ~255 regardless of hue.
+        """
+        text = self.read_text(
+            image, whitelist="0123456789,.", use_v_channel=True,
+        )
+        text = text.replace(",", "").replace(".", "").replace(" ", "")
+        if not text:
+            return None
+        try:
+            return int(text)
+        except ValueError:
+            return None
+
+    def read_class_glyph(self, image: np.ndarray) -> Optional[str]:
+        """Read the L/M/H class indicator (single uppercase letter)."""
+        text = self.read_text(
+            image, whitelist="LMH", psm=10, use_v_channel=True,
+        )
+        text = text.strip().upper()
+        if not text:
+            return None
+        # psm 10 is single-character; take the first plausible letter.
+        for ch in text:
+            if ch in "LMH":
+                return ch
+        return None
 
     def read_region(
             self,
