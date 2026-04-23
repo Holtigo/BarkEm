@@ -185,6 +185,19 @@ python -m barkem.tools.highlight_watch
 python -m barkem.api
 ```
 
+Binds to `settings.api.host` / `settings.api.port` (defaults
+`0.0.0.0:8080`). Structured logs go to stdout *and*
+`settings.logging.file` (rotating).
+
+Endpoints:
+
+| Method | Path                              | Purpose                                      |
+|--------|-----------------------------------|----------------------------------------------|
+| POST   | `/api/v1/match/start`             | Start a match; blocks until lobby code is OCR'd |
+| GET    | `/api/v1/match/{match_id}/status` | Current phase + roster progress              |
+| POST   | `/api/v1/match/{match_id}/cancel` | Request cancellation                         |
+| GET    | `/api/v1/status`                  | Bot idle/busy + uptime                       |
+
 ### Create a match via API
 
 ```bash
@@ -221,6 +234,34 @@ curl -X POST http://localhost:8080/api/v1/match/start \
 ```
 
 **Note:** The first player in each team is the **captain**. Only captains can trigger `-em ready`, `-em pause`, and `-em unpause` commands.
+
+Optional per-match overrides (any field omitted falls back to
+`settings.yaml`):
+
+```json
+{
+  "cancel_timeout_seconds": 300,
+  "ready_timeout_seconds": 300,
+  "min_ready_captains": 2,
+  "max_match_duration_s": 1200,
+  "pause": {
+    "max_duration_s": 300,
+    "max_pauses_per_team": 2,
+    "cooldown_s": 30
+  }
+}
+```
+
+Use `min_ready_captains: 1` when testing with a single real account —
+same semantics as the CLI `--min-ready 1` flag on
+`python -m barkem.tools.start_match`.
+
+The webhook POST'd to `webhook_url` carries the complete Phase 6
+statline per player (`class`, `elims`, `assists`, `deaths`, `revives`,
+`damage`, `support`, `objective`) plus `embark_id`, `ocr_name`, and
+`matched` (true when fuzzy-matching the OCR'd name succeeded against
+the request roster). No derived `score` field — consumers compute
+their own weighted totals.
 
 ## Project Structure
 
@@ -338,9 +379,48 @@ A guided calibration wizard lives at `python -m barkem.tools.calibrate
 via two right-clicks each, then prints a ready-to-paste YAML block for
 `regions.scoreboard`.
 
-**Phase 7 next** — API endpoints, webhook result delivery, and the
-orchestrator that wires Phases 2-5 together behind a single
-`POST /api/v1/match/start` call.
+**Phase 7 complete** — REST API + orchestrator that runs the full
+flow end-to-end from a single `POST /api/v1/match/start` call: focus
+the game window → create lobby → wait for all expected players to
+join the unassigned list → place teams → watch chat for captain
+ready → drive the live match (pause handling + sparse end
+detection) → OCR the scoreboard → POST a structured payload to the
+caller's `webhook_url`.
+
+The request body mirrors §6 of `the-finals-bot-report_v2_5.md`.
+Match-policy knobs (`cancel_timeout_seconds`, `ready_timeout_seconds`,
+`min_ready_captains`, `max_match_duration_s`, per-match `pause`
+block) are optional per-request overrides; input timing
+(button delays, keyboard warmup, gamepad recovery) stays in
+`settings.yaml` because it's a property of the bot VM's local
+latency, not the match.
+
+Key design decisions:
+
+- **Blocking lobby-code response.** `POST /match/start` blocks until
+  the lobby is created and its code has been OCR'd (~20-30s), then
+  returns `202 Accepted` with the code in the body. The rest of the
+  pipeline runs on a background task. Matches the report's §6.2
+  example exactly — clients don't have to poll to get the code.
+- **One match per process.** The bot holds a single virtual XInput
+  controller; a second `POST /match/start` while a run is active
+  returns `409 Conflict`. This carries into Phase 8: multiple bots
+  means multiple processes, one per GeForce NOW VM, fanned out by
+  the coordinator.
+- **Webhook payload carries every stat.** Each `players[]` entry in
+  the webhook body has the full Phase 6 statline (class, elims,
+  assists, deaths, revives, damage, support, objective) alongside
+  `ocr_name` / `embark_id` / `matched`. No derived `score` field —
+  callers compute their own weighted total.
+- **Structured logging.** The API layer and orchestrator route
+  through `loguru`, with a stdout sink plus a rotating file sink at
+  `settings.logging.file`. The existing bot classes keep their
+  `print(..., flush=True)` pattern — the loguru rollout is scoped
+  to Phase 7 code only.
+- **No WebSocket yet.** `GET /api/v1/match/{id}/status` exposes the
+  current phase, lobby code, and roster progress — enough for a
+  coordinator to poll. `§6.3` stream endpoint is deferred until
+  Phase 8 actually asks for it.
 
 **Phase 8+ (future, not started)** — Once the core bot runs
 unattended and reliably, the direction is a small product around
@@ -364,10 +444,32 @@ it:
    sessions managed, match-hours supervised) for operators who
    opt in. No per-match detail, no PII.
 
+Additional Phase 8 work items tracked alongside coordinator /
+distribution:
+
+4. **Same-lobby multi-map series.** Scrims typically run several
+   maps back-to-back with identical rosters. Currently each
+   `/match/start` creates a fresh lobby and the players re-join;
+   once a match ends, The Finals returns everyone to the private
+   match screen with their team/spectator slots intact, so the bot
+   can change only the map and press X again. This needs: a
+   `POST /api/v1/match/next` (or a `best_of > 1` continuation
+   mode) that reuses the current lobby, a map-only variant of
+   `LobbyCreator` that skips creation + placement, and a
+   series-level webhook that aggregates per-map results.
+5. **Per-mode map / variant / condition / game show pools.** The
+   current config assumes the default map pool for Final Round,
+   Cashout, Head2Head, and Quick Cash. Modes like Team Deathmatch
+   and Point Break have different pools, and variants / conditions
+   / game shows are per-map. Needs: per-mode `maps` tables in
+   `settings.yaml`, per-map `variant` / `condition` / `game_show`
+   sub-tables, and API-side validation that rejects invalid
+   combinations before driving the UI.
+
 Phase 7 design decisions — API binding, configuration
 precedence, structured logging, heartbeat endpoint — are picked
-to avoid painting Phase 8+ into a corner. See the
-`the-finals-bot-report_v2_4.md` Appendix D for the full
+to avoid painting Phase 8+ into a corner. See
+`the-finals-bot-report_v2_5.md` Appendix D / §6 for the full
 long-term plan.
 
 ### Mode / map / variant relationships
